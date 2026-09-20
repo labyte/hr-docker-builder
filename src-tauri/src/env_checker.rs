@@ -1,0 +1,65 @@
+use tokio::process::Command;
+use crate::types::EnvInfo;
+
+async fn out(args: &[&str]) -> Result<String, String> {
+    let o = Command::new("docker")
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| format!("docker 不可用 / docker not available: {e}"))?;
+    if o.status.success() {
+        Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else {
+        let mut combined = o.stdout.clone();
+        combined.extend_from_slice(&o.stderr);
+        Err(String::from_utf8_lossy(&combined).trim().to_string())
+    }
+}
+
+fn parse_platforms(inspect: &str) -> Vec<String> {
+    inspect
+        .lines()
+        .find_map(|l| l.strip_prefix("Platforms:"))
+        .map(|l| l.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+pub async fn probe(builder: &str) -> EnvInfo {
+    let mut env = EnvInfo::default();
+    match out(&["--version"]).await {
+        Ok(v) => { env.docker_ok = true; env.docker_version = v; }
+        Err(_) => return env,
+    }
+    if let Ok(v) = out(&["buildx", "version"]).await {
+        env.buildx_ok = true;
+        env.buildx_version = v;
+    }
+    env.daemon_ok = out(&["info", "--format", "{{.ServerVersion}}"]).await.is_ok();
+    if env.daemon_ok && env.buildx_ok {
+        if let Ok(text) = out(&["buildx", "inspect", builder]).await {
+            env.builder_ok = true;
+            env.builder_platforms = parse_platforms(&text);
+        }
+    }
+    env
+}
+
+pub async fn ensure_builder(builder: &str) -> Result<EnvInfo, String> {
+    if !out(&["--version"]).await.is_ok() { return Err("docker_missing".into()); }
+    if !out(&["buildx", "version"]).await.is_ok() { return Err("buildx_missing".into()); }
+    if !out(&["info", "--format", "{{.ServerVersion}}"]).await.is_ok() { return Err("daemon_missing".into()); }
+    let exists = out(&["buildx", "inspect", builder]).await.is_ok();
+    if !exists {
+        out(&["buildx", "create", "--name", builder, "--driver", "docker-container"])
+            .await
+            .map_err(|e| format!("builder_create_failed: {e}"))?;
+    }
+    out(&["buildx", "inspect", "--bootstrap", builder])
+        .await
+        .map_err(|e| format!("builder_bootstrap_failed: {e}"))?;
+    Ok(probe(builder).await)
+}
+
+pub async fn install_qemu() -> Result<String, String> {
+    out(&["run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "all"]).await
+}

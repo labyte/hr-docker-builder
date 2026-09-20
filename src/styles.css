@@ -1,0 +1,157 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #f5f6fa;
+}
+
+/* antd <App> 的包裹层默认无高度，会截断 100% 高度链，必须显式撑满 */
+#root > .ant-app,
+.ant-app {
+  height: 100%;
+}
+
+/* 固定定位锁定整个视口 */
+.page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+/* 垂直布局：上方项目列表，可拖拽分隔条，下方构建控制台 */
+.split {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 左侧高度由内联像素控制，右侧 flex:1 自动填充剩余空间 */
+.split .left {
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: #fff;
+}
+
+.split .right {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.splitter {
+  height: 12px;
+  flex: 0 0 12px;
+  cursor: row-resize;
+  touch-action: none;
+  background: #f5f5f8;
+  border-top: 1px solid #e8e8ee;
+  border-bottom: 1px solid #e8e8ee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background 0.15s;
+}
+.splitter:hover {
+  background: #e6ecfa;
+}
+.splitter-grip {
+  width: 46px;
+  height: 4px;
+  border-radius: 2px;
+  background: #c3c9d5;
+}
+.splitter:hover .splitter-grip {
+  background: #7e93c4;
+}
+
+/* 工具条分组 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  background: #f7f8fa;
+  border: 1px solid #ececf1;
+  border-radius: 8px;
+}
+.tb-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a8f99;
+  white-space: nowrap;
+}
+.toolbar-actions {
+  margin-left: auto;
+}
+
+.log {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  background: #0e1526;
+  color: #d8dee9;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-radius: 8px;
+  min-height: 0;
+}
+
+.log-autoscroll {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(14, 21, 38, 0.75);
+  color: #aab3c5;
+  font-size: 12px;
+}
+
+.log .err {
+  color: #ff8a7a;
+}
+
+.log .ok {
+  color: #7ee2a8;
+}
+
+/* Tabs 内日志区撑满高度 */
+.log-tabs {
+  height: 100%;
+}
+.log-tabs .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+}
+.log-tabs .ant-tabs-content {
+  height: 100%;
+}
+.log-tabs .ant-tabs-tabpane {
+  height: 100%;
+}

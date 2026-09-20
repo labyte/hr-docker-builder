@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(mkdir -p /Users/no-onel/Work/HR/code/hr-docker-tool/dist)",
+      "Bash(cargo check *)",
+      "Bash(node scripts/gen-icon.cjs)",
+      "Bash(npx tauri *)",
+      "Bash(npm run *)"
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# ────────────────────────────────────────────────────────────────
+# .NET 多架构镜像模板（amd64 ↔ arm64 交叉构建，免 QEMU 模拟编译）
+#
+# 用法（dockerfile 参数指向本文件或项目自带 Dockerfile）：
+#   docker buildx build --builder hr-builder \
+#     --build-arg PROJECT_PATH=Order.Api/Order.Api.csproj \
+#     --platform linux/amd64 -t myapp:1.0-amd64-... --load .
+#
+# 交叉构建原理：编译阶段固定跑在"构建机架构"($BUILDPLATFORM) 上，
+# 用 dotnet publish -a $TARGETARCH 交叉发布目标架构，全程不执行目标
+# 架构代码 → 无需 QEMU、速度快。仅最终 runtime 层按目标架构选择。
+#
+# NuGet 离线还原（内网/离线机）：
+#   --build-arg NUGET_PACKAGES=/path/to/packages
+# 把本地已还原的包目录挂进编译阶段（host 路径需与构建上下文可挂载
+# 方式一致；纯离线推荐把 packages 目录放进上下文并以 COPY 方式提供，
+# 或使用内网 NuGet 源注入 nuget.config）。
+# ────────────────────────────────────────────────────────────────
+ARG SDK_VERSION=8.0
+
+# ---------- 构建阶段：固定在构建机架构上交叉编译 ----------
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:${SDK_VERSION} AS build
+ARG TARGETARCH            # buildx 自动注入：amd64 | arm64
+ARG PROJECT_PATH=App.csproj
+ARG PUBLISH_DIR=/publish
+ARG NUGET_PACKAGES=       # 离线模式：指向本地 NuGet 包目录（非空则启用）
+WORKDIR /src
+COPY . .
+# nuget.config 若存在于上下文则自动生效（内网源场景）
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet publish "${PROJECT_PATH}" \
+      -c Release \
+      -r "linux-${TARGETARCH}" --self-contained false \
+      -o "${PUBLISH_DIR}" \
+      --nologo -v minimal
+
+# ---------- 运行阶段：按目标架构选基础镜像 ----------
+ARG SDK_VERSION
+FROM mcr.microsoft.com/dotnet/aspnet:${SDK_VERSION} AS final
+ARG PROJECT_PATH=App.csproj
+WORKDIR /app
+COPY --from=build /publish ./
+# 将 PROJECT_PATH 的文件名作为入口程序集（dotnet 自动发现 *.dll 亦可）
+ENTRYPOINT ["sh", "-c", "entry=$(ls *.dll | head -1); exec dotnet \"${entry}\""]
+EXPOSE 8080
