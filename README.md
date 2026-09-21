@@ -99,7 +99,8 @@
 | Linux 装 deb 还是 AppImage | deb 适合 Debian/Ubuntu 系常规安装；AppImage 单文件免安装，适合其他发行版或试用 |
 | 日志太长卡顿 | 面板为虚拟滚动，且日志完整落盘文件，UI 仅保留尾部；用「打开日志目录」查完整记录 |
 
-## 9. 版本与发布
+## 9. 版本历史
 
-- 界面右下角/标题栏版本即当前版本；历史版本见 [Releases](https://github.com/labyte/hr-docker-builder/releases)。
-- 维护者发布新版：合入 `main` 后 `git tag vX.Y.Z && git push origin vX.Y.Z`，CI 自动构建 macOS / Windows / Linux(amd64+arm64) 并发布 Release（详见工作流文件）。
+标题栏版本即当前版本；所有历史版本的下载入口见 [Releases](https://github.com/labyte/hr-docker-builder/releases)。
+
+维护者发版流程（版本号同步、tag 触发 CI 自动发布）属于开发侧内容，见 [docs/开发计划.md](docs/开发计划.md) §11。
