@@ -26,7 +26,7 @@
 | Windows (x64) | `*.msi` | 双击安装 |
 | Linux (x86_64) | `*_amd64.deb` | `sudo apt install ./HR.Docker.Builder_<版本>_amd64.deb` |
 | Linux (x86_64，免安装) | `*_amd64.AppImage` | `chmod +x` 后直接运行 |
-| Linux (ARM64) | `*_aarch64.deb` / `*_aarch64.AppImage` | 同上（自最新 CI 构建起提供） |
+| Linux (ARM64) | `*_arm64.deb` / `*_aarch64.AppImage` | 同上（v0.1.2 起提供） |
 
 首次启动会自动检测 Docker 环境（docker / buildx / daemon / builder），异常时顶部会出现黄色提示条并给出修复入口。
 
