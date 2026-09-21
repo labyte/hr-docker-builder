@@ -8,6 +8,7 @@ use tokio::task::JoinSet;
 
 use crate::commands::AppState;
 use crate::docker_exec;
+use crate::env_checker;
 use crate::project_store;
 use crate::types::{BuildTask, QueueDone, StartBuildRequest, StatusEvent};
 
@@ -34,6 +35,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
         .join("logs").join(format!("run-{run_id}"));
     let _ = std::fs::create_dir_all(&log_dir);
 
+    let host_arch = env_checker::host_arch().await;
     let mut tasks: Vec<BuildTask> = Vec::new();
     for pid in &req.program_ids {
         let Some(program) = project.programs.iter().find(|p| &p.id == pid) else { continue };
@@ -42,6 +44,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                 task_id: format!("{}-{}", program.id, arch),
                 program: program.clone(),
                 arch: arch.clone(),
+                host_arch: host_arch.clone(),
                 registry: global.registry.clone(),
                 builder_name: global.builder_name.clone(),
                 tag_template: global.tag_template.clone(),

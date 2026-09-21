@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tokio::process::Command;
+use crate::shell::docker_cmd;
 
 use crate::types::LogEvent;
 
@@ -80,7 +80,7 @@ pub async fn export_pack(
     // 3. docker save → tar
     let tar_path = dir.join("offline-pack.tar");
     emit_line(app, run_id, &format!("Saving to {}...", tar_path.display()), "stdout");
-    let mut cmd = Command::new("docker");
+    let mut cmd = docker_cmd();
     cmd.args(["save", "-o"]).arg(&tar_path);
     for img in &images {
         cmd.arg(img);
@@ -105,7 +105,7 @@ pub async fn export_pack(
 }
 
 async fn pull_image(image: &str) -> Result<(), String> {
-    let out = Command::new("docker")
+    let out = docker_cmd()
         .args(["pull", image])
         .output()
         .await
@@ -126,7 +126,7 @@ pub async fn import_pack(app: &AppHandle, tar_path: &str, run_id: &str) -> Resul
 
     // 1. docker load
     emit_line(app, run_id, "Importing offline pack (docker load)...", "stdout");
-    let out = Command::new("docker")
+    let out = docker_cmd()
         .args(["load", "-i", tar_path])
         .output()
         .await
@@ -161,13 +161,13 @@ pub async fn bootstrap_offline_env(
     run_id: &str,
 ) -> Result<String, String> {
     // 1. 已有同名 builder？删了重建（确保用本地镜像）
-    let _ = Command::new("docker")
+    let _ = docker_cmd()
         .args(["buildx", "rm", builder_name])
         .output()
         .await;
 
     emit_line(app, run_id, &format!("Creating builder {builder_name}..."), "stdout");
-    let out = Command::new("docker")
+    let out = docker_cmd()
         .args(["buildx", "create", "--name", builder_name, "--driver", "docker-container"])
         .output()
         .await
@@ -178,7 +178,7 @@ pub async fn bootstrap_offline_env(
     }
 
     emit_line(app, run_id, &format!("Bootstrapping builder {builder_name}..."), "stdout");
-    let out = Command::new("docker")
+    let out = docker_cmd()
         .args(["buildx", "inspect", "--bootstrap", builder_name])
         .output()
         .await
@@ -192,7 +192,7 @@ pub async fn bootstrap_offline_env(
 
     // 3. 注册 QEMU（尝试，离线时需要 --privileged；失败不阻断）
     emit_line(app, run_id, "Registering QEMU (binfmt)...", "stdout");
-    let out = Command::new("docker")
+    let out = docker_cmd()
         .args(["run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "all"])
         .output()
         .await;

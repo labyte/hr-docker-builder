@@ -142,6 +142,8 @@ pub struct BuildTask {
     pub task_id: String,
     pub program: Program,
     pub arch: String,
+    /// 宿主架构；与 arch 相同时走 default builder（FROM 优先解析本机镜像）
+    pub host_arch: String,
     pub registry: String,
     pub builder_name: String,
     pub tag_template: String,
@@ -197,6 +199,8 @@ pub struct EnvInfo {
     pub builder_platforms: Vec<String>,
     pub docker_version: String,
     pub buildx_version: String,
+    /// 宿主架构 amd64/arm64：同架构构建走 default builder（本机镜像优先）
+    pub host_arch: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -7,6 +7,7 @@ mod env_checker;
 mod project_store;
 mod types;
 mod offline_pack;
+mod shell;
 
 use commands::AppState;
 

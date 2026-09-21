@@ -92,11 +92,11 @@ pub fn cancel_build(state: State<AppState>) {
 pub fn reveal_path(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     #[cfg(target_os = "macos")]
-    let mut cmd = { let mut c = std::process::Command::new("open"); c.arg("-R").arg(p); c };
+    let mut cmd = { let mut c = crate::shell::std_cmd("open"); c.arg("-R").arg(p); c };
     #[cfg(target_os = "windows")]
-    let mut cmd = { let mut c = std::process::Command::new("explorer"); c.arg(format!("/select,{}", p.to_string_lossy())); c };
+    let mut cmd = { let mut c = crate::shell::std_cmd("explorer"); c.arg(format!("/select,{}", p.to_string_lossy())); c };
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut cmd = { let mut c = std::process::Command::new("xdg-open"); c.arg(p.parent().unwrap_or(std::path::Path::new("/"))); c };
+    let mut cmd = { let mut c = crate::shell::std_cmd("xdg-open"); c.arg(p.parent().unwrap_or(std::path::Path::new("/"))); c };
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }

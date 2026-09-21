@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tauri::{AppHandle, Emitter};
+
+use crate::shell::docker_cmd;
 
 use crate::types::{BuildTask, LogEvent, Outputs};
 
@@ -35,19 +36,26 @@ pub async fn execute(
         None
     };
 
+    // 同架构 → default(docker 驱动) builder：FROM 优先解析本机 docker 镜像库，
+    // 离线环境下本机有基础镜像即可构建；缺省才走外网。
+    // 交叉架构 → 仍用 docker-container（hr-builder）：需要 QEMU/独立缓存，
+    // 该驱动不共享本机镜像库，离线机请先导入离线包并保证 builder 就绪。
+    let use_default = !task.host_arch.is_empty() && task.arch == task.host_arch;
+
     let mut args: Vec<String> = vec![
         "buildx".into(), "build".into(),
-        "--builder".into(), task.builder_name.clone(),
+        "--builder".into(), if use_default { "default".into() } else { task.builder_name.clone() },
         "--progress".into(), "plain".into(),
         "--platform".into(), format!("linux/{}", task.arch),
         "-f".into(), task.program.dockerfile.clone(),
     ];
 
     // tag 策略
-    let push_native = push && tar_path.is_none() && !load_local;
-    match (&registry_tag, tar_path.is_some(), load_local, push) {
-        (Some(rt), false, false, true) => { args.extend(["-t".into(), rt.clone()]); }
-        (Some(rt), ..) => { args.extend(["-t".into(), local_tag.clone(), "-t".into(), rt.clone()]); }
+    let push_native = !use_default && push && tar_path.is_none() && !load_local;
+    match (&registry_tag, use_default) {
+        (Some(rt), true) => { args.extend(["-t".into(), local_tag.clone(), "-t".into(), rt.clone()]); }
+        (Some(rt), false) if push_native => { args.extend(["-t".into(), rt.clone()]); }
+        (Some(rt), false) => { args.extend(["-t".into(), local_tag.clone(), "-t".into(), rt.clone()]); }
         _ => { args.extend(["-t".into(), local_tag.clone()]); }
     }
     for (k, v) in &task.program.build_args {
@@ -59,35 +67,56 @@ pub async fn execute(
     }
     if let Some(tar) = &tar_path {
         if let Some(parent) = std::path::Path::new(tar).parent() { let _ = std::fs::create_dir_all(parent); }
-        args.extend(["--output".into(), format!("type=docker,dest={tar}")]);
-    } else if load_local {
-        args.push("--load".into());
-    } else if push_native {
-        args.push("--push".into());
+    }
+    if !use_default {
+        // default 驱动不支持 --output/--push（构建结果自动进本机镜像库），
+        // 导出与推送在构建完成后用 docker save / docker push 单独执行
+        if let Some(tar) = &tar_path {
+            args.extend(["--output".into(), format!("type=docker,dest={tar}")]);
+        } else if load_local {
+            args.push("--load".into());
+        } else if push_native {
+            args.push("--push".into());
+        }
     }
     args.push(task.program.context.clone());
 
     let log_file = task.log_dir.join(format!("{}-{}.log", task.task_id, task.arch));
 
-    // 1) buildx
+    // 1) build
+    if use_default {
+        emit_line(app, task, "[本机优先] 同架构构建走 default builder：FROM 先查本机镜像库，缺失才联网拉取", "stdout");
+    }
     let code = stream_cmd(app, task, &log_file, cancel, &args).await?;
     if code != 0 {
         return Err(if cancel.load(Ordering::Relaxed) { "canceled".into() } else { format!("build_failed(exit {code})") });
     }
 
-    // 2) need load after export
-    let need_load = tar_path.is_some() && (load_local || (push && !push_native));
-    if need_load {
-        let tar = tar_path.clone().unwrap();
-        let code = stream_cmd(app, task, &log_file, cancel, &["load".into(), "-i".into(), tar]).await?;
-        if code != 0 { return Err(format!("docker_load_failed(exit {code})")); }
-    }
-
-    // 3) push after load
-    if push && !push_native {
-        let rt = registry_tag.clone().unwrap();
-        let code = stream_cmd(app, task, &log_file, cancel, &["push".into(), rt]).await?;
-        if code != 0 { return Err(format!("docker_push_failed(exit {code})")); }
+    if use_default {
+        // default 驱动：产物已在本机镜像库（load_local 无需额外步骤）；导出用 save、推送用 push
+        if let Some(tar) = &tar_path {
+            let code = stream_cmd(app, task, &log_file, cancel, &["save".into(), "-o".into(), tar.clone(), local_tag.clone()]).await?;
+            if code != 0 { return Err(format!("docker_save_failed(exit {code})")); }
+        }
+        if push {
+            let rt = registry_tag.clone().unwrap();
+            let code = stream_cmd(app, task, &log_file, cancel, &["push".into(), rt]).await?;
+            if code != 0 { return Err(format!("docker_push_failed(exit {code})")); }
+        }
+    } else {
+        // 2) need load after export
+        let need_load = tar_path.is_some() && (load_local || (push && !push_native));
+        if need_load {
+            let tar = tar_path.clone().unwrap();
+            let code = stream_cmd(app, task, &log_file, cancel, &["load".into(), "-i".into(), tar]).await?;
+            if code != 0 { return Err(format!("docker_load_failed(exit {code})")); }
+        }
+        // 3) push after load
+        if push && !push_native {
+            let rt = registry_tag.clone().unwrap();
+            let code = stream_cmd(app, task, &log_file, cancel, &["push".into(), rt]).await?;
+            if code != 0 { return Err(format!("docker_push_failed(exit {code})")); }
+        }
     }
 
     Ok(tag)
@@ -106,7 +135,7 @@ async fn stream_cmd(
     app: &AppHandle, task: &BuildTask, log_file: &std::path::Path,
     cancel: &Arc<AtomicBool>, args: &[String],
 ) -> Result<i32, String> {
-    let mut cmd = Command::new("docker");
+    let mut cmd = docker_cmd();
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
 
     let display = format!("$ docker {}", args.join(" "));

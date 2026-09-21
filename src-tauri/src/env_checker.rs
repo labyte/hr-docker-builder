@@ -1,8 +1,8 @@
-use tokio::process::Command;
+use crate::shell::docker_cmd;
 use crate::types::EnvInfo;
 
 async fn out(args: &[&str]) -> Result<String, String> {
-    let o = Command::new("docker")
+    let o = docker_cmd()
         .args(args)
         .output()
         .await
@@ -24,12 +24,29 @@ fn parse_platforms(inspect: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// 宿主机架构（amd64/arm64）：优先问 docker daemon，退化用编译期目标
+pub async fn host_arch() -> String {
+    match out(&["info", "--format", "{{.Architecture}}"]).await {
+        Ok(a) => normalize_arch(&a),
+        Err(_) => normalize_arch(std::env::consts::ARCH),
+    }
+}
+
+fn normalize_arch(raw: &str) -> String {
+    match raw.trim().to_lowercase().as_str() {
+        "x86_64" | "amd64" => "amd64".into(),
+        "aarch64" | "arm64" => "arm64".into(),
+        other => other.into(),
+    }
+}
+
 pub async fn probe(builder: &str) -> EnvInfo {
     let mut env = EnvInfo::default();
     match out(&["--version"]).await {
         Ok(v) => { env.docker_ok = true; env.docker_version = v; }
         Err(_) => return env,
     }
+    env.host_arch = host_arch().await;
     if let Ok(v) = out(&["buildx", "version"]).await {
         env.buildx_ok = true;
         env.buildx_version = v;

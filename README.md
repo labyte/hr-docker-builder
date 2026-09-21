@@ -71,8 +71,13 @@
 
 - **未检测到 docker / daemon 未运行**：安装或启动 Docker，就绪后自动恢复（或点「刷新环境」）；
 - **未检测到 buildx**：升级 Docker Desktop / Engine；
-- **builder 不存在**：点「一键修复（创建 builder）」；
+- **builder 不存在**：点「一键修复（创建 builder）」——仅交叉架构构建需要，同架构构建自动走 default builder；
 - **交叉架构缺 QEMU**：点「安装 QEMU（binfmt）」。注意 .NET 项目使用默认多架构模板（`$BUILDPLATFORM` 编译 + 交叉发布）时通常**不需要** QEMU，仅当镜像必须运行目标架构代码时才用到。
+
+构建器选择规则（自动，无需配置）：
+
+- **同架构**（目标 = 本机）：走 `default` builder，`FROM` 基础镜像**优先使用本机 docker 已有镜像**，本机没有才联网拉取——离线机导入镜像后可直接构建；
+- **交叉架构**（如 amd64 机建 arm64）：走 `hr-builder`（docker-container 驱动），需要 builder 就绪与 QEMU（按需）。
 
 配置与日志存放：项目配置持久化在应用数据目录（`com.hr.dockerbuilder`）的 `projects.json`；每次构建日志落盘于日志目录（面板「打开日志目录」直达），备份/迁移只需拷这两个位置。
 
@@ -86,6 +91,8 @@
 4. 构建全程不出网。
 
 .NET 还原离线方案：在「设置/编辑程序」中配置**离线 NuGet 包目录**（或指向内网 NuGet 源），Dockerfile 模板已参数化支持。
+
+> 离线机做**同架构**构建时，只要本机 docker 已有基础镜像（导入过离线包或此前拉取过）即可直接构建，无需任何外网；交叉架构构建才涉及 builder 自举与 QEMU。
 
 ## 8. 常见问题
 
