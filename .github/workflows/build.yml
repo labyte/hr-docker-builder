@@ -60,7 +60,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hr-docker-builder-${{ matrix.target }}
-          path: src-tauri/target/release/bundle/
+          # 只上传最终安装包，排除 bundle/ 下 Tauri 打包过程的解包目录（*.app、deb/AppDir 暂存等）
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: ignore
 
   release:
     needs: build
@@ -76,5 +82,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          # 双保险：即使 artifacts 里混入其他文件，也只发布安装包
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.msi
           generate_release_notes: true
