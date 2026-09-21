@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -37,28 +38,17 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli@latest
-
       - name: Build Tauri (macOS)
         if: runner.os == 'macOS'
-        run: tauri build --bundles dmg
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx tauri build --bundles dmg
 
       - name: Build Tauri (Linux)
         if: runner.os == 'Linux'
-        run: tauri build --bundles deb,appimage
+        run: npx tauri build --bundles deb,appimage
 
       - name: Build Tauri (Windows)
         if: runner.os == 'Windows'
-        run: tauri build --bundles msi
+        run: npx tauri build --bundles msi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
