@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use crate::shell::docker_cmd;
 
 use crate::types::LogEvent;
@@ -98,10 +98,9 @@ async fn pull_image(image: &str) -> Result<(), String> {
     run_ok(&["pull", image]).await.map_err(|e| format!("pull {image} 失败: {e}"))
 }
 
-/// 供 env_checker/commands 使用：若离线 registry 在跑且 mirror 配置存在，返回 buildkitd.toml 路径
-pub fn offline_mirror_config(app: &AppHandle) -> Option<String> {
-    let dir = app.path().app_data_dir().ok()?;
-    let toml = dir.join("offline").join("buildkitd.toml");
+/// 供 commands 使用：若 mirror 配置存在（导入离线包生成于数据根目录），返回 buildkitd.toml 路径
+pub fn offline_mirror_config(root: &Path) -> Option<String> {
+    let toml = root.join("offline").join("buildkitd.toml");
     toml.is_file().then(|| toml.to_string_lossy().to_string())
 }
 
@@ -170,7 +169,7 @@ pub async fn export_pack(
     // 4. 启动临时本地 registry（每个上游一个，端口 5000+i）
     for r in regs.values() {
         let name = format!("hr-offline-reg-{}", r.index);
-        run_ignore(&["rm", "-f", &name]);
+        run_ignore(&["rm", "-f", &name]).await;
         let bind = format!("{}:{}:5000", publish_bind(), r.port);
         run_ok(&["run", "-d", "--name", &name, "-p", &bind, "registry:2"])
             .await.map_err(|e| format!("启动本地 registry 失败: {e}"))?;
@@ -191,7 +190,7 @@ pub async fn export_pack(
         fs::create_dir_all(&out).map_err(|e| e.to_string())?;
         run_ok(&["cp", &format!("{name}:/var/lib/registry/."), out.to_str().unwrap_or(".")]).await?;
     }
-    for r in regs.values() { run_ignore(&["rm", "-f", &format!("hr-offline-reg-{}", r.index)]); }
+    for r in regs.values() { run_ignore(&["rm", "-f", &format!("hr-offline-reg-{}", r.index)]).await; }
 
     // 7. images.tar：工具镜像 + 基础镜像（本机架构，docker load 用）
     let tar = dir.join("images.tar");
@@ -215,7 +214,7 @@ pub async fn export_pack(
 }
 
 // ── 导入离线包（离线机）──
-pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str) -> Result<PackManifest, String> {
+pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &Path) -> Result<PackManifest, String> {
     let dir = Path::new(pack_dir);
     let manifest_path = dir.join("manifest.json");
     if !dir.is_dir() || !manifest_path.is_file() {
@@ -237,7 +236,7 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str) -> Resul
     // 2. 启动各上游对应的本地 registry 并灌入数据
     for r in &manifest.registries {
         let name = format!("hr-offline-reg-{}", r.index);
-        run_ignore(&["rm", "-f", &name]);
+        run_ignore(&["rm", "-f", &name]).await;
         let bind = format!("{}:{}:5000", publish_bind(), r.port);
         emit_line(app, run_id, &format!("启动本地 registry（{} → :{}）", r.host, r.port), "stdout");
         run_ok(&["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"]).await?;
@@ -251,7 +250,7 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str) -> Resul
     }
 
     // 3. 生成 buildkitd.toml（供 hr-builder --config）与镜像清单备份
-    let off_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("offline");
+    let off_dir = root.join("offline");
     fs::create_dir_all(&off_dir).map_err(|e| e.to_string())?;
     fs::write(off_dir.join("buildkitd.toml"), mirror_toml(&manifest.registries)).map_err(|e| e.to_string())?;
     if let Ok(j) = serde_json::to_string_pretty(&manifest.registries) {
@@ -268,8 +267,9 @@ pub async fn bootstrap_offline_env(
     app: &AppHandle,
     builder_name: &str,
     run_id: &str,
+    root: &Path,
 ) -> Result<String, String> {
-    let config = offline_mirror_config(app);
+    let config = offline_mirror_config(root);
 
     // 1. 已有同名 builder？删了重建（确保带上 mirror 配置）
     let _ = docker_cmd().args(["buildx", "rm", builder_name]).output().await;

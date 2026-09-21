@@ -18,6 +18,7 @@
     "build": "开始构建",
     "cancel": "取消构建",
     "settings": "设置",
+    "about": "关于",
     "refreshEnv": "刷新环境",
     "language": "语言",
     "exportPack": "导出离线包",
@@ -97,7 +98,25 @@
     "tagTemplate": "Tag 模板（{version} {arch} {time}）",
     "concurrency": "并发数",
     "failFast": "失败即中止",
-    "saved": "设置已保存"
+    "dataDir": "数据目录",
+    "dataDirPlaceholder": "留空使用系统默认目录",
+    "dataDirHint": "存放项目配置、构建日志、默认导出目录与离线包数据；更改后重启生效，首次自动迁移当前配置",
+    "saved": "设置已保存",
+    "buildBlock": "构建设置（队列并发 / 失败策略）",
+    "systemBlock": "系统设置（仓库 / Builder / 数据目录）",
+    "saveBuild": "保存构建设置",
+    "saveSystem": "保存系统设置",
+    "blockSaved": "该组设置已保存",
+    "menuBuild": "构建",
+    "menuRegistry": "Registry",
+    "menuNaming": "命名",
+    "menuData": "数据",
+    "saveSection": "保存",
+    "buildDesc": "批量构建队列行为",
+    "concurrencyDesc": "同时构建的程序数（1–8）",
+    "registryDesc": "勾选「推送 Registry」时使用；不推送可留空",
+    "namingDesc": "镜像 Tag 与 builder 实例命名规则",
+    "builderNameDesc": "仅交叉架构构建使用；同架构自动走 default builder"
   },
   "log": {
     "title": "构建日志",
@@ -127,6 +146,16 @@
     "docker_push_failed": "docker push 失败（请确认 docker login）",
     "build_failed": "构建失败，详见日志",
     "saveBlocked": "构建运行中，暂不可修改配置"
+  },
+  "about": {
+    "title": "关于",
+    "desc": "面向 .NET 团队的跨平台 Docker 批量构建工具：多项目队列构建、amd64/arm64 交叉构建、产物导出 tar / 本地加载 / 推送 Registry、实时日志与内网离线支持。",
+    "repo": "代码仓库",
+    "releases": "版本下载",
+    "stack": "技术栈",
+    "copyright": "© 2026 HR Team · 内部工具",
+    "copyLink": "复制链接",
+    "copied": "已复制到剪贴板"
   },
   "common": {
     "ok": "确定",

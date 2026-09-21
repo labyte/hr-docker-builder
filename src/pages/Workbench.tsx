@@ -5,6 +5,7 @@ import ProjectSidebar from '../components/ProjectSidebar';
 import ProgramTable from '../components/ProgramTable';
 import ProgramFormModal from '../components/ProgramFormModal';
 import SettingsModal from '../components/SettingsModal';
+import AboutModal from '../components/AboutModal';
 import LogPanel from '../components/LogPanel';
 import { useStore } from '../store';
 import type { Program } from '../types';
@@ -19,6 +20,7 @@ export default function Workbench() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Program | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const splitRef = useRef<HTMLDivElement>(null);
   const [topPx, setTopPx] = useState<number | null>(() => {
@@ -63,7 +65,7 @@ export default function Workbench() {
           <ProjectSidebar />
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <Toolbar onOpenSettings={() => setSettingsOpen(true)} />
+          <Toolbar onOpenSettings={() => setSettingsOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
           <div className="split" ref={splitRef}>
             <div className="left" style={{ height: topPx ?? '55%' }}>
               <ProgramTable
@@ -84,6 +86,7 @@ export default function Workbench() {
       </div>
       <ProgramFormModal open={formOpen} initial={editing} onClose={() => setFormOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }

@@ -7,6 +7,7 @@ use crate::build_queue;
 use crate::env_checker;
 use crate::offline_pack;
 use crate::project_store;
+use crate::project_store::effective_root;
 use crate::types::{AppConfig, EnvInfo, PathIssue, StartBuildRequest};
 use chrono::Local;
 
@@ -39,10 +40,13 @@ pub async fn check_env(state: State<'_, AppState>) -> Result<EnvInfo, String> {
 
 #[tauri::command]
 pub async fn ensure_builder(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
-    let builder = state.config.lock().unwrap().global.builder_name.clone();
+    let (builder, root) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+    };
     // 离线机若已导入 registry mirror 且容器在跑，builder 需带 mirror 配置创建
     let config = match offline_pack::offline_registry_running().await {
-        true => offline_pack::offline_mirror_config(&app),
+        true => offline_pack::offline_mirror_config(&root),
         false => None,
     };
     env_checker::ensure_builder(&builder, config.as_deref()).await
@@ -139,7 +143,10 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
 
 #[tauri::command]
 pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pack_dir: String) -> Result<String, String> {
-    let builder = state.config.lock().unwrap().global.builder_name.clone();
+    let (builder, root) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+    };
     let rid = Local::now().format("import-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
@@ -147,12 +154,12 @@ pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pac
     let bn = builder.clone();
     tauri::async_runtime::spawn(async move {
         use crate::types::{LogEvent, QueueDone};
-        if let Err(e) = offline_pack::import_pack(&app2, &tp, &rid2).await {
+        if let Err(e) = offline_pack::import_pack(&app2, &tp, &rid2, &root).await {
             let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导入失败: {e}"), stream: "stderr".into() });
             let _ = app2.emit("queue-done", QueueDone { success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
             return;
         }
-        match offline_pack::bootstrap_offline_env(&app2, &bn, &rid2).await {
+        match offline_pack::bootstrap_offline_env(&app2, &bn, &rid2, &root).await {
             Ok(msg) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: msg, stream: "stdout".into() });
                 let _ = app2.emit("queue-done", QueueDone { success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });

@@ -11,7 +11,7 @@ export const defaultOutputs = (): Outputs => ({ exportFile: true, loadLocal: fal
 
 const defaultConfig = (): AppConfig => ({
   version: 1,
-  global: { language: 'auto', registry: '', builderName: 'hr-builder', tagTemplate: '{version}-{arch}-{time}', concurrency: 1, failFast: false },
+  global: { language: 'auto', registry: '', builderName: 'hr-builder', tagTemplate: '{version}-{arch}-{time}', concurrency: 1, failFast: false, dataDir: '' },
   projects: [],
 });
 

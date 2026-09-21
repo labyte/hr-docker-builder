@@ -13,13 +13,13 @@ import type { Outputs } from '../types';
 
 const OUTPUT_KEYS: (keyof Outputs)[] = ['exportFile', 'loadLocal', 'push'];
 
-interface Props { onOpenSettings: () => void }
+interface Props { onOpenSettings: () => void; onOpenAbout: () => void }
 
 function Group(props: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return <div className="tb-group"><span className="tb-group-label">{props.icon}{props.label}</span>{props.children}</div>;
 }
 
-export default function Toolbar({ onOpenSettings }: Props) {
+export default function Toolbar({ onOpenSettings, onOpenAbout }: Props) {
   const { t, i18n } = useTranslation();
   const { message } = App.useApp();
   const selectedId = useStore((s) => s.selectedProjectId);
@@ -96,7 +96,9 @@ export default function Toolbar({ onOpenSettings }: Props) {
           </Tooltip>
         )}
         <Divider type="vertical" />
-        <Tooltip title={t('toolbar.settings')}><Button icon={<SettingOutlined />} onClick={onOpenSettings} /></Tooltip>
+        <Dropdown menu={{ items: [{ key: 'settings', label: t('toolbar.settings') }, { key: 'about', label: t('toolbar.about') }], onClick: ({ key }) => (key === 'settings' ? onOpenSettings() : onOpenAbout()) }}>
+          <Tooltip title={t('toolbar.settings')}><Button icon={<SettingOutlined />} /></Tooltip>
+        </Dropdown>
         <Dropdown menu={{ selectedKeys: [i18n.language], items: [{ key: 'zh-CN', label: '中文' }, { key: 'en', label: 'English' }], onClick: ({ key }) => setLang(String(key)) }}>
           <Tooltip title={t('toolbar.language')}><Button icon={<GlobalOutlined />} /></Tooltip>
         </Dropdown>

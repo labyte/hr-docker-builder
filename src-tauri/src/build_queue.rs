@@ -23,16 +23,17 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
         (cfg.global.clone(), proj, cancel)
     };
 
+    let root = project_store::effective_root(&app, &global);
+
     let export_dir = if req.export_dir.trim().is_empty() {
-        let dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("exports");
+        let dir = root.join("exports");
         let _ = std::fs::create_dir_all(&dir);
         dir.to_string_lossy().to_string()
     } else {
         req.export_dir.clone()
     };
 
-    let log_dir: PathBuf = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir())
-        .join("logs").join(format!("run-{run_id}"));
+    let log_dir: PathBuf = root.join("logs").join(format!("run-{run_id}"));
     let _ = std::fs::create_dir_all(&log_dir);
 
     let host_arch = env_checker::host_arch().await;

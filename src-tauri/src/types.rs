@@ -26,6 +26,8 @@ pub struct GlobalSettings {
     pub tag_template: String,
     pub concurrency: usize,
     pub fail_fast: bool,
+    /// 数据目录（projects/logs/exports/offline）；留空使用系统默认应用数据目录
+    pub data_dir: String,
 }
 impl Default for GlobalSettings {
     fn default() -> Self {
@@ -36,6 +38,7 @@ impl Default for GlobalSettings {
             tag_template: "{version}-{arch}-{time}".into(),
             concurrency: 1,
             fail_fast: false,
+            data_dir: String::new(),
         }
     }
 }

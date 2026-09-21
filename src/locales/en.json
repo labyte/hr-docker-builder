@@ -18,6 +18,7 @@
     "build": "Build",
     "cancel": "Cancel",
     "settings": "Settings",
+    "about": "About",
     "refreshEnv": "Refresh env",
     "language": "Language",
     "exportPack": "Export offline pack",
@@ -97,7 +98,25 @@
     "tagTemplate": "Tag template ({version} {arch} {time})",
     "concurrency": "Parallel",
     "failFast": "Stop on failure",
-    "saved": "Settings saved"
+    "dataDir": "Data directory",
+    "dataDirPlaceholder": "Empty = system default",
+    "dataDirHint": "Stores project config, build logs, default export dir and offline data. Applied after restart; current config migrates automatically.",
+    "saved": "Settings saved",
+    "buildBlock": "Build settings (queue parallel / failure policy)",
+    "systemBlock": "System settings (registry / builder / data dir)",
+    "saveBuild": "Save build settings",
+    "saveSystem": "Save system settings",
+    "blockSaved": "Section saved",
+    "menuBuild": "Build",
+    "menuRegistry": "Registry",
+    "menuNaming": "Naming",
+    "menuData": "Data",
+    "saveSection": "Save",
+    "buildDesc": "Batch build queue behavior",
+    "concurrencyDesc": "Programs built concurrently (1–8)",
+    "registryDesc": "Used when pushing to a registry; leave empty if not pushing",
+    "namingDesc": "Image tag and builder instance naming rules",
+    "builderNameDesc": "Used only for cross-arch builds; same-arch builds use the default builder"
   },
   "log": {
     "title": "Build logs",
@@ -127,6 +146,16 @@
     "docker_push_failed": "docker push failed (check docker login)",
     "build_failed": "Build failed, see logs",
     "saveBlocked": "Config is locked while a build queue runs"
+  },
+  "about": {
+    "title": "About",
+    "desc": "Cross-platform batch Docker image builder for .NET teams: queued multi-project builds, amd64/arm64 cross builds, tar export / local load / registry push, real-time logs and offline intranet support.",
+    "repo": "Repository",
+    "releases": "Downloads",
+    "stack": "Stack",
+    "copyright": "© 2026 HR Team · Internal tool",
+    "copyLink": "Copy",
+    "copied": "Copied to clipboard"
   },
   "common": {
     "ok": "OK",

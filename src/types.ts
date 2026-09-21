@@ -11,6 +11,8 @@ export interface GlobalSettings {
   tagTemplate: string;
   concurrency: number;
   failFast: boolean;
+  /** 数据目录（projects/logs/exports），留空为系统默认 */
+  dataDir: string;
 }
 
 export interface Project {
