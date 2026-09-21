@@ -6,7 +6,8 @@
       "Bash(cargo check *)",
       "Bash(node scripts/gen-icon.cjs)",
       "Bash(npx tauri *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npm ci *)"
     ]
   }
 }

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
 import i18n from './i18n';
 import { api } from './api';
-import type { AppConfig, EnvInfo, LogLine, Outputs, PathIssue, Program, Project, QueueDone, StatusEvent } from './types';
+import type { AppConfig, ConfigCorruptEvent, EnvInfo, LogLine, Outputs, PathIssue, Program, Project, QueueDone, StatusEvent } from './types';
 
 const LOG_CAP = 3000;
 const ALL_CAP = 6000;
@@ -16,7 +16,6 @@ const defaultConfig = (): AppConfig => ({
 });
 
 let listenersReady = false;
-let dirtyPersist = false;
 
 export interface BuilderState {
   config: AppConfig;
@@ -24,7 +23,6 @@ export interface BuilderState {
   env: EnvInfo | null;
   envBusy: boolean;
   selectedProjectId: string | null;
-  selectedIds: string[];
 
   // 当前选中项目的设置（工具栏绑定）
   arch: string;
@@ -38,6 +36,8 @@ export interface BuilderState {
   allLogs: LogLine[];
   summary: QueueDone | null;
   lang: string;
+  /** 配置文件损坏通知（App 层弹窗消费一次后置空） */
+  corruptNotice: ConfigCorruptEvent | null;
 
   init: () => Promise<void>;
   refreshEnv: () => Promise<void>;
@@ -45,7 +45,7 @@ export interface BuilderState {
   installQemu: () => Promise<void>;
   persist: (cfg: AppConfig) => Promise<boolean>;
   selectProject: (id: string | null) => void;
-  setSelected: (ids: string[]) => void;
+  setProgramsEnabled: (projectId: string, enabledIds: string[]) => Promise<boolean>;
   setArch: (a: string) => void;
   setOutputs: (o: Outputs) => void;
   setConcurrency: (n: number) => void;
@@ -68,7 +68,6 @@ export const useStore = create<BuilderState>((set, get) => ({
   env: null,
   envBusy: false,
   selectedProjectId: null,
-  selectedIds: [],
   arch: 'amd64',
   outputs: defaultOutputs(),
   concurrency: 1,
@@ -79,8 +78,30 @@ export const useStore = create<BuilderState>((set, get) => ({
   allLogs: [],
   summary: null,
   lang: i18n.language,
+  corruptNotice: null,
 
   init: async () => {
+    // 先注册监听再拉配置：get_config 会冲刷 config-corrupt 通知，须先就绪才能收到
+    if (!listenersReady) {
+      listenersReady = true;
+      await listen<LogLine>('build-log', ({ payload }) => {
+        set((s) => {
+          const prev = s.logs[payload.projectId] ?? [];
+          return { logs: { ...s.logs, [payload.projectId]: [...prev, payload].slice(-LOG_CAP) }, allLogs: [...s.allLogs, payload].slice(-ALL_CAP) };
+        });
+      });
+      await listen<StatusEvent>('build-status', ({ payload }) => {
+        set((s) => ({ statuses: { ...s.statuses, [payload.programId]: { ...(s.statuses[payload.programId] ?? {}), [payload.arch]: payload } } }));
+      });
+      await listen<QueueDone>('queue-done', async ({ payload }) => {
+        set({ running: false, summary: payload });
+        // 构建期间后端已把 lastBuild 写盘：重拉配置保持同步，
+        // 防止前端旧副本在下次保存时把它回滚覆盖
+        try { set({ config: await api.getConfig() }); } catch (e) { console.error(e); }
+      });
+      await listen<ConfigCorruptEvent>('config-corrupt', ({ payload }) => set({ corruptNotice: payload }));
+      i18n.on('languageChanged', (l) => set({ lang: l }));
+    }
     try {
       const config = await api.getConfig();
       set({ config,
@@ -94,23 +115,6 @@ export const useStore = create<BuilderState>((set, get) => ({
         void i18n.changeLanguage(config.global.language);
       }
     } catch (e) { console.error(e); }
-    if (!listenersReady) {
-      listenersReady = true;
-      await listen<LogLine>('build-log', ({ payload }) => {
-        set((s) => {
-          const prev = s.logs[payload.projectId] ?? [];
-          return { logs: { ...s.logs, [payload.projectId]: [...prev, payload].slice(-LOG_CAP) }, allLogs: [...s.allLogs, payload].slice(-ALL_CAP) };
-        });
-      });
-      await listen<StatusEvent>('build-status', ({ payload }) => {
-        set((s) => ({ statuses: { ...s.statuses, [payload.programId]: { ...(s.statuses[payload.programId] ?? {}), [payload.arch]: payload } } }));
-      });
-      await listen<QueueDone>('queue-done', ({ payload }) => {
-        set({ running: false, summary: payload });
-        if (dirtyPersist) { dirtyPersist = false; void get().persist(get().config); }
-      });
-      i18n.on('languageChanged', (l) => set({ lang: l }));
-    }
   },
 
   refreshEnv: async () => { set({ envBusy: true }); try { set({ env: await api.checkEnv() }); } finally { set({ envBusy: false }); } },
@@ -118,15 +122,22 @@ export const useStore = create<BuilderState>((set, get) => ({
   installQemu: async () => { set({ envBusy: true }); try { await api.installQemu(); set({ env: await api.checkEnv() }); } finally { set({ envBusy: false }); } },
 
   persist: async (cfg) => {
+    // 保存失败（queue_running / offline_busy）不应用到 state：UI 自动回退，调用方提示 saveBlocked
     try { set({ config: cfg, issues: await api.saveConfig(cfg) }); return true; }
-    catch (e) { if (String(e).startsWith('queue_running')) dirtyPersist = true; return false; }
+    catch { return false; }
   },
 
   selectProject: (id) => {
     const proj = get().config.projects.find(p => p.id === id);
     set({ selectedProjectId: id, arch: proj?.defaultArch ?? 'amd64', outputs: proj?.outputs ?? defaultOutputs() });
   },
-  setSelected: (ids) => set({ selectedIds: ids }),
+  // 表格复选框勾选 = 参与构建：批量写回 enabled 并持久化（一次保存）
+  setProgramsEnabled: async (projectId, enabledIds) => {
+    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return false;
+    const on = new Set(enabledIds);
+    if (!prj.programs.some(p => p.enabled !== on.has(p.id))) return true;
+    return s.upsertProject({ ...prj, programs: prj.programs.map(p => ({ ...p, enabled: on.has(p.id) })) });
+  },
   setArch: (a) => { set({ arch: a }); updateProject(get, a); },
   setOutputs: (o) => { set({ outputs: o }); updateProject(get, undefined, o); },
   setConcurrency: (n) => { set({ concurrency: n }); get().saveGlobal({ concurrency: n }); },
@@ -169,12 +180,11 @@ export const useStore = create<BuilderState>((set, get) => ({
   startBuild: async () => {
     const s = get();
     if (!s.selectedProjectId) return 'no_project';
-    if (!s.selectedIds.length) return 'no_programs';
     if (!s.outputs.exportFile && !s.outputs.loadLocal && !s.outputs.push) return 'no_outputs';
     const arches = s.arch === 'both' ? ['amd64', 'arm64'] : [s.arch];
     const prj = s.config.projects.find(p => p.id === s.selectedProjectId);
-    // 只构建勾选且「参与构建」的程序
-    const programIds = (prj?.programs ?? []).filter(p => s.selectedIds.includes(p.id) && p.enabled).map(p => p.id);
+    // 复选框勾选即参与构建
+    const programIds = (prj?.programs ?? []).filter(p => p.enabled).map(p => p.id);
     if (!programIds.length) return 'no_projects';
     try {
       await api.startBuild({ programIds, projectId: s.selectedProjectId!, arches, outputs: s.outputs, concurrency: s.concurrency, failFast: s.failFast, exportDir: prj?.exportDir ?? '' });

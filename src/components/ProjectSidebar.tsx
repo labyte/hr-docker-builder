@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Checkbox, Dropdown, Input, List, Modal, Segmented, Tooltip, Typography } from 'antd';
-import { CloudUploadOutlined, CopyOutlined, DeleteOutlined, DesktopOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import { CloudFilled, CopyFilled, DeleteFilled, HomeFilled, EditFilled, FolderOpenFilled, PlusOutlined, SaveFilled } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import type { Outputs, Project } from '../types';
@@ -33,9 +33,9 @@ export default function ProjectSidebar() {
 
   const outputIcon = (p: Project) => (
     <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
-      {p.outputs.exportFile && <Tooltip title="导出文件"><SaveOutlined style={{ fontSize: 12, color: '#1677ff' }} /></Tooltip>}
-      {p.outputs.loadLocal && <Tooltip title="本地加载"><DesktopOutlined style={{ fontSize: 12, color: '#52c41a' }} /></Tooltip>}
-      {p.outputs.push && <Tooltip title="推送 Registry"><CloudUploadOutlined style={{ fontSize: 12, color: '#fa8c16' }} /></Tooltip>}
+      {p.outputs.exportFile && <Tooltip title={t('toolbar.exportFile')}><SaveFilled style={{ fontSize: 12, color: '#1677ff' }} /></Tooltip>}
+      {p.outputs.loadLocal && <Tooltip title="本地加载"><HomeFilled style={{ fontSize: 12, color: '#52c41a' }} /></Tooltip>}
+      {p.outputs.push && <Tooltip title="推送 Registry"><CloudFilled style={{ fontSize: 12, color: '#fa8c16' }} /></Tooltip>}
     </span>
   );
 
@@ -55,16 +55,16 @@ export default function ProjectSidebar() {
         renderItem={(p) => {
           const sel = selectedId === p.id;
           const menuItems = [
-            { key: 'copy', icon: <CopyOutlined />, label: t('sidebar.copy'),
+            { key: 'copy', icon: <CopyFilled />, label: t('sidebar.copy'),
               onClick: async (info: { domEvent: React.MouseEvent | React.KeyboardEvent }) => {
                 info.domEvent.stopPropagation();
                 const c = await copyProject(p.id);
                 if (c) { selectProject(c.id); message.success(t('sidebar.copied')); }
               } },
-            { key: 'edit', icon: <EditOutlined />, label: t('sidebar.editProject'),
+            { key: 'edit', icon: <EditFilled />, label: t('common.edit'),
               onClick: () => { setEditing(p); setEditOpen(true); } },
             { type: 'divider' as const },
-            { key: 'delete', icon: <DeleteOutlined />, label: t('table.delete'), danger: true,
+            { key: 'delete', icon: <DeleteFilled />, label: t('table.delete'), danger: true,
               onClick: () => modal.confirm({
                 title: t('sidebar.deleteConfirm', { name: p.name }), okText: t('common.ok'), cancelText: t('common.cancel'), okButtonProps: { danger: true },
                 onOk: async () => { const ok = await removeProject(p.id); if (!ok) message.warning(t('errors.saveBlocked')); },
@@ -137,6 +137,9 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
   const reset = () => { setName(''); setExportDir(''); setContextDir(''); setArch('amd64'); setOutputs(defaultOutputs()); };
   const checkedOutputs = OUTPUT_KEYS.filter(k => outputs[k]).map(String);
 
+  // 行内标签：定宽右对齐，让各行控件纵向对齐
+  const LABEL = { fontSize: 12, width: 80, flexShrink: 0, textAlign: 'right' } as const;
+
   return (
     <Modal
       open={open}
@@ -153,48 +156,50 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
       okText={t('common.save')}
       cancelText={t('common.cancel')}
     >
-      <Input placeholder={t('sidebar.projectName')} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-      <div style={{ marginTop: 14 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('toolbar.arch')}</Typography.Text>
-        <div>
-          <Segmented value={arch} onChange={v => setArch(String(v))}
-            options={[
-              { label: t('toolbar.amd64'), value: 'amd64' },
-              { label: t('toolbar.arm64'), value: 'arm64' },
-              { label: t('toolbar.both'), value: 'both' },
-            ]} />
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Typography.Text type="secondary" style={LABEL}>{t('sidebar.projectName')}</Typography.Text>
+        <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus style={{ flex: 1 }} />
       </div>
-      <div style={{ marginTop: 12 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('toolbar.outputs')}</Typography.Text>
-        <div>
-          <Checkbox.Group
-            value={checkedOutputs}
-            onChange={v => {
-              const next = defaultOutputs();
-              next.exportFile = next.loadLocal = next.push = false;
-              for (const key of v as string[]) { if (key in next) next[key as keyof Outputs] = true; }
-              setOutputs(next);
-            }}
-            options={OUTPUT_KEYS.map(k => ({ label: t(`toolbar.${k}`), value: k }))}
-          />
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+        <Typography.Text type="secondary" style={LABEL}>{t('toolbar.arch')}</Typography.Text>
+        <Segmented value={arch} onChange={v => setArch(String(v))}
+          options={[
+            { label: t('toolbar.amd64'), value: 'amd64' },
+            { label: t('toolbar.arm64'), value: 'arm64' },
+            { label: t('toolbar.both'), value: 'both' },
+          ]} />
       </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        <Input placeholder={t('sidebar.exportDir')} value={exportDir} onChange={(e) => setExportDir(e.target.value)} style={{ flex: 1 }} />
-        <Button icon={<FolderOpenOutlined />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setExportDir(d); }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+        <Typography.Text type="secondary" style={LABEL}>{t('toolbar.outputs')}</Typography.Text>
+        <Checkbox.Group
+          value={checkedOutputs}
+          onChange={v => {
+            const next = defaultOutputs();
+            next.exportFile = next.loadLocal = next.push = false;
+            for (const key of v as string[]) { if (key in next) next[key as keyof Outputs] = true; }
+            setOutputs(next);
+          }}
+          options={OUTPUT_KEYS.map(k => ({ label: t(`toolbar.${k}`), value: k }))}
+        />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+        <Typography.Text type="secondary" style={LABEL}>{t('sidebar.imageDir')}</Typography.Text>
+        <Input placeholder={t('sidebar.imageDirPlaceholder')} value={exportDir} onChange={(e) => setExportDir(e.target.value)} style={{ flex: 1 }} />
+        <Button icon={<FolderOpenFilled />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setExportDir(d); }}>
           {t('form.pickDir')}
         </Button>
       </div>
-      <div style={{ marginTop: 12 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('sidebar.projectContext')}</Typography.Text>
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <Input placeholder={t('sidebar.projectContextPlaceholder')} value={contextDir} onChange={(e) => setContextDir(e.target.value)} style={{ flex: 1 }} />
-          <Button icon={<FolderOpenOutlined />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setContextDir(d); }}>
-            {t('form.pickDir')}
-          </Button>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 12 }}>
+        <Typography.Text type="secondary" style={{ ...LABEL, lineHeight: '32px' }}>{t('sidebar.contextDir')}</Typography.Text>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Input placeholder={t('sidebar.projectContextPlaceholder')} value={contextDir} onChange={(e) => setContextDir(e.target.value)} style={{ flex: 1 }} />
+            <Button icon={<FolderOpenFilled />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setContextDir(d); }}>
+              {t('form.pickDir')}
+            </Button>
+          </div>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('sidebar.projectContextHint')}</Typography.Text>
         </div>
-        <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('sidebar.projectContextHint')}</Typography.Text>
       </div>
     </Modal>
   );

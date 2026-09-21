@@ -109,3 +109,10 @@ export interface PathIssue {
   field: string;
   message: string;
 }
+
+/** 配置文件损坏通知：后端已把原文件备份，前端弹窗提示手动恢复 */
+export interface ConfigCorruptEvent {
+  path: string;
+  backup: string;
+  error: string;
+}

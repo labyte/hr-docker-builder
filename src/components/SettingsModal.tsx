@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Form, Input, InputNumber, Menu, Modal, Switch, Typography } from 'antd';
+import { App, Button, Col, Form, Input, InputNumber, Menu, Modal, Row, Switch, Typography } from 'antd';
 import {
-  CloudServerOutlined, DatabaseOutlined, InboxOutlined, SettingOutlined, TagsOutlined, ThunderboltOutlined,
-  FolderOpenOutlined,
+  CloudFilled, DatabaseFilled, HddFilled, SettingFilled, TagsFilled, ThunderboltFilled,
+  FolderOpenFilled,
 } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
@@ -52,11 +52,11 @@ export default function SettingsModal({ open, onClose }: Props) {
     key: 'menu',
     style: { width: 168, flex: '0 0 168px' },
     items: [
-      { key: 'build', icon: <ThunderboltOutlined />, label: t('settings.menuBuild') },
-      { key: 'registry', icon: <CloudServerOutlined />, label: t('settings.menuRegistry') },
-      { key: 'naming', icon: <TagsOutlined />, label: t('settings.menuNaming') },
-      { key: 'data', icon: <DatabaseOutlined />, label: t('settings.menuData') },
-      { key: 'nuget', icon: <InboxOutlined />, label: t('settings.menuNuget') },
+      { key: 'build', icon: <ThunderboltFilled />, label: t('settings.menuBuild') },
+      { key: 'registry', icon: <CloudFilled />, label: t('settings.menuRegistry') },
+      { key: 'naming', icon: <TagsFilled />, label: t('settings.menuNaming') },
+      { key: 'data', icon: <DatabaseFilled />, label: t('settings.menuData') },
+      { key: 'nuget', icon: <HddFilled />, label: t('settings.menuNuget') },
     ],
     onClick: ({ key }: { key: string }) => setActive(key as Section),
   };
@@ -77,12 +77,19 @@ export default function SettingsModal({ open, onClose }: Props) {
           {active === 'build' && (
             <Form form={buildForm} layout="vertical">
               {sectionTitle(t('settings.menuBuild'), t('settings.buildDesc'))}
-              <Form.Item name="concurrency" label={t('settings.concurrency')} extra={t('settings.concurrencyDesc')}>
-                <InputNumber min={1} max={8} style={{ width: 96 }} />
-              </Form.Item>
-              <Form.Item name="failFast" label={t('settings.failFast')} valuePropName="checked">
-                <Switch checkedChildren={t('toolbar.failFast')} unCheckedChildren={t('toolbar.failFastKeep')} />
-              </Form.Item>
+              {/* 并发数与失败策略同行展示，节省纵向空间 */}
+              <Row gutter={24}>
+                <Col span={12}>
+                  <Form.Item name="concurrency" label={t('settings.concurrency')} layout="horizontal">
+                    <InputNumber min={1} max={8} style={{ width: 96 }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="failFast" label={t('settings.failFast')} layout="horizontal" valuePropName="checked">
+                    <Switch checkedChildren={t('toolbar.failFast')} unCheckedChildren={t('toolbar.failFastKeep')} />
+                  </Form.Item>
+                </Col>
+              </Row>
               <Form.Item name="buildArgPresets" label={t('settings.buildPresets')} extra={t('settings.buildPresetsHint')}>
                 <Input.TextArea rows={3} placeholder={'CONFIGURATION=Release\nNUGET_RESTORE=/ci/nuget'} style={{ fontFamily: 'monospace', fontSize: 12 }} />
               </Form.Item>
@@ -121,7 +128,7 @@ export default function SettingsModal({ open, onClose }: Props) {
                   placeholder={t('settings.dataDirPlaceholder')}
                   allowClear
                   addonAfter={
-                    <FolderOpenOutlined
+                    <FolderOpenFilled
                       style={{ cursor: 'pointer' }}
                       onClick={async () => {
                         const dir = await openDialog({ directory: true });
@@ -143,7 +150,7 @@ export default function SettingsModal({ open, onClose }: Props) {
                   placeholder="/data/nuget-packages"
                   allowClear
                   addonAfter={
-                    <FolderOpenOutlined
+                    <FolderOpenFilled
                       style={{ cursor: 'pointer' }}
                       onClick={async () => {
                         const dir = await openDialog({ directory: true });
@@ -166,5 +173,5 @@ export default function SettingsModal({ open, onClose }: Props) {
 // 标题栏占位（保持标题行高与其他弹窗一致）
 function Space_() {
   const { t } = useTranslation();
-  return <span><SettingOutlined style={{ marginRight: 8 }} />{t('settings.title')}</span>;
+  return <span><SettingFilled style={{ marginRight: 8 }} />{t('settings.title')}</span>;
 }

@@ -91,39 +91,46 @@ pub async fn execute(
     if use_default {
         emit_line(app, task, "[本机优先] 同架构构建走 default builder：FROM 先查本机镜像库，缺失才联网拉取", "stdout");
     }
-    let code = stream_cmd(app, task, &log_file, cancel, &args).await?;
-    if code != 0 {
-        return Err(if cancel.load(Ordering::Relaxed) { "canceled".into() } else { format!("build_failed(exit {code})") });
-    }
+    step(app, task, &log_file, cancel, &args, "build_failed").await?;
 
     if use_default {
         // default 驱动：产物已在本机镜像库（load_local 无需额外步骤）；导出用 save、推送用 push
         if let Some(tar) = &tar_path {
-            let code = stream_cmd(app, task, &log_file, cancel, &["save".into(), "-o".into(), tar.clone(), local_tag.clone()]).await?;
-            if code != 0 { return Err(format!("docker_save_failed(exit {code})")); }
+            step(app, task, &log_file, cancel, &["save".into(), "-o".into(), tar.clone(), local_tag.clone()], "docker_save_failed").await?;
         }
         if push {
             let rt = registry_tag.clone().unwrap();
-            let code = stream_cmd(app, task, &log_file, cancel, &["push".into(), rt]).await?;
-            if code != 0 { return Err(format!("docker_push_failed(exit {code})")); }
+            step(app, task, &log_file, cancel, &["push".into(), rt], "docker_push_failed").await?;
         }
     } else {
         // 2) need load after export
         let need_load = tar_path.is_some() && (load_local || (push && !push_native));
         if need_load {
             let tar = tar_path.clone().unwrap();
-            let code = stream_cmd(app, task, &log_file, cancel, &["load".into(), "-i".into(), tar]).await?;
-            if code != 0 { return Err(format!("docker_load_failed(exit {code})")); }
+            step(app, task, &log_file, cancel, &["load".into(), "-i".into(), tar], "docker_load_failed").await?;
         }
         // 3) push after load
         if push && !push_native {
             let rt = registry_tag.clone().unwrap();
-            let code = stream_cmd(app, task, &log_file, cancel, &["push".into(), rt]).await?;
-            if code != 0 { return Err(format!("docker_push_failed(exit {code})")); }
+            step(app, task, &log_file, cancel, &["push".into(), rt], "docker_push_failed").await?;
         }
     }
 
     Ok(tag)
+}
+
+/// 单步 docker 命令统一包装：
+/// - 启动前检查取消——已取消的队列不再继续 save/push/load（否则取消后仍可能完成推送）
+/// - 退出码非 0 时先判是否取消所致，避免把用户取消误报为 docker_*_failed
+/// - kill CLI 即断开 buildx/buildkit 会话，daemon 侧构建随之中止
+async fn step(app: &AppHandle, task: &BuildTask, log_file: &std::path::Path, cancel: &Arc<AtomicBool>, args: &[String], err_key: &str) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
+    let code = stream_cmd(app, task, log_file, cancel, args).await?;
+    if code != 0 {
+        if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
+        return Err(format!("{err_key}(exit {code})"));
+    }
+    Ok(())
 }
 
 fn render_tag(template: &str, version: &str, arch: &str, time: &str) -> String {

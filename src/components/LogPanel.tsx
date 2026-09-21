@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Empty, Space, Switch, Tabs, Tooltip, Typography } from 'antd';
-import { FolderOpenOutlined } from '@ant-design/icons';
+import { FolderOpenFilled } from '@ant-design/icons';
 import { api } from '../api';
 import { useStore } from '../store';
 import type { LogLine } from '../types';
@@ -68,9 +68,9 @@ export default function LogPanel() {
         <Button size="small" onClick={clearLogs}>
           {t('log.clear')}
         </Button>
-        {summary && (
+        {summary && summary.logDir && (
           <Tooltip title={summary.logDir}>
-            <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void api.revealPath(summary.logDir)}>
+            <Button size="small" icon={<FolderOpenFilled />} onClick={() => void api.revealPath(summary.logDir)}>
               {t('log.openDir')}
             </Button>
           </Tooltip>

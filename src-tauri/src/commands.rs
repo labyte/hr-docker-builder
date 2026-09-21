@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::build_queue;
 use crate::env_checker;
@@ -15,18 +15,52 @@ use chrono::Local;
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub queue_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// 离线包导出/导入占用标志：与构建队列及自身互斥（防并发互踩、防中途改配置）
+    pub offline_busy: Mutex<Option<Arc<AtomicBool>>>,
+    /// 配置文件损坏通知：load 时记录，get_config 时冲刷为事件（此时前端监听已就绪）
+    pub corrupt_notices: Mutex<Vec<crate::types::ConfigCorruptEvent>>,
+}
+
+/// 离线任务兜底守卫：正常结束或 panic 都释放 offline_busy 占用
+struct OfflineGuard(AppHandle);
+impl Drop for OfflineGuard {
+    fn drop(&mut self) {
+        if let Some(st) = self.0.try_state::<AppState>() {
+            if let Ok(mut b) = st.offline_busy.lock() { *b = None; }
+        }
+    }
+}
+
+/// 互斥检查（锁序固定：queue_cancel → offline_busy，各处一致以杜绝交叉竞态）；
+/// 通过则占用 offline_busy，返回 Err 表示被谁挡下
+fn acquire_offline(state: &State<'_, AppState>) -> Result<(), String> {
+    let q = state.queue_cancel.lock().unwrap();
+    let mut b = state.offline_busy.lock().unwrap();
+    if q.is_some() { return Err("queue_running".into()); }
+    if b.is_some() { return Err("offline_busy".into()); }
+    *b = Some(Arc::new(AtomicBool::new(false)));
+    Ok(())
 }
 
 #[tauri::command]
 pub fn get_config(app: AppHandle, state: State<AppState>) -> Result<AppConfig, String> {
     let cfg = project_store::load(&app)?;
     *state.config.lock().unwrap() = cfg.clone();
+    // 冲刷配置损坏通知（前端 init 先注册监听再拉配置，见 store.ts）
+    for n in std::mem::take(&mut *state.corrupt_notices.lock().unwrap()) {
+        let _ = app.emit("config-corrupt", n);
+    }
     Ok(cfg)
 }
 
 #[tauri::command]
 pub fn save_config(app: AppHandle, state: State<AppState>, config: AppConfig) -> Result<Vec<PathIssue>, String> {
-    if state.queue_cancel.lock().unwrap().is_some() { return Err("queue_running".into()); }
+    {
+        let q = state.queue_cancel.lock().unwrap();
+        let b = state.offline_busy.lock().unwrap();
+        if q.is_some() { return Err("queue_running".into()); }
+        if b.is_some() { return Err("offline_busy".into()); }
+    }
     project_store::save(&app, &config)?;
     *state.config.lock().unwrap() = config.clone();
     Ok(project_store::validate(&config))
@@ -61,6 +95,8 @@ pub async fn install_qemu() -> Result<String, String> {
 pub fn start_build(app: AppHandle, state: State<AppState>, req: StartBuildRequest) -> Result<String, String> {
     {
         let mut q = state.queue_cancel.lock().unwrap();
+        let b = state.offline_busy.lock().unwrap();
+        if b.is_some() { return Err("offline_busy".into()); }
         if q.is_some() { return Err("queue_running".into()); }
         *q = Some(Arc::new(AtomicBool::new(false)));
     }
@@ -70,9 +106,19 @@ pub fn start_build(app: AppHandle, state: State<AppState>, req: StartBuildReques
     }
     let run_id = Local::now().format("%Y%m%d-%H%M%S").to_string();
     let app2 = app.clone();
+    let app3 = app.clone();
     let req2 = req.clone();
     let rid = run_id.clone();
-    tauri::async_runtime::spawn(async move { build_queue::run(app2, req2, rid).await; });
+    let rid2 = run_id.clone();
+    // 看护 run()：内层 panic 时（队列锁已由 run 内 Drop 守卫释放）合成 queue-done 让前端脱离 running 卡死
+    tauri::async_runtime::spawn(async move {
+        let inner = tauri::async_runtime::spawn(async move { build_queue::run(app2, req2, rid).await; });
+        if inner.await.is_err() {
+            use crate::types::{LogEvent, QueueDone};
+            let _ = app3.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: "构建队列异常终止（内部错误），已自动解除占用".into(), stream: "stderr".into() });
+            let _ = app3.emit("queue-done", QueueDone { success: 0, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: String::new() });
+        }
+    });
     Ok(run_id)
 }
 
@@ -148,11 +194,13 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
         .map(|p| p.dockerfile.clone())
         .collect();
     if dockerfiles.is_empty() { return Err("no_dockerfiles".into()); }
+    acquire_offline(&state)?; // 与构建队列及另一次导出/导入互斥
     let rid = Local::now().format("offline-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
     let did = dest_dir.clone();
     tauri::async_runtime::spawn(async move {
+        let _guard = OfflineGuard(app2.clone());
         use crate::types::{LogEvent, QueueDone};
         match offline_pack::export_pack(&app2, dockerfiles, &did, &rid2).await {
             Ok(m) => {
@@ -170,6 +218,7 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
 
 #[tauri::command]
 pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pack_dir: String) -> Result<String, String> {
+    acquire_offline(&state)?; // 与构建队列及另一次导出/导入互斥；导入期间禁止改配置（root 已固定）
     let (builder, root) = {
         let cfg = state.config.lock().unwrap();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
@@ -180,6 +229,7 @@ pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pac
     let tp = pack_dir.clone();
     let bn = builder.clone();
     tauri::async_runtime::spawn(async move {
+        let _guard = OfflineGuard(app2.clone());
         use crate::types::{LogEvent, QueueDone};
         if let Err(e) = offline_pack::import_pack(&app2, &tp, &rid2, &root).await {
             let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导入失败: {e}"), stream: "stderr".into() });

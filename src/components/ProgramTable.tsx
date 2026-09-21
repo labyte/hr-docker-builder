@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Checkbox, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { DeleteOutlined, EditOutlined, WarningOutlined } from '@ant-design/icons';
+import { App, Button, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { DeleteFilled, EditFilled, WarningFilled } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../store';
 import type { Program, StatusEvent } from '../types';
@@ -27,12 +27,10 @@ export default function ProgramTable({ onEdit }: Props) {
   const project = useStore(s => s.config.projects.find(p => p.id === s.selectedProjectId));
   const programs = project?.programs ?? [];
   const issues = useStore(s => s.issues);
-  const selectedIds = useStore(s => s.selectedIds);
-  const setSelected = useStore(s => s.setSelected);
+  const setProgramsEnabled = useStore(s => s.setProgramsEnabled);
   const statuses = useStore(s => s.statuses);
   const running = useStore(s => s.running);
   const removeProgram = useStore(s => s.removeProgram);
-  const upsertProgram = useStore(s => s.upsertProgram);
 
   const issueSet = useMemo(() => {
     const set = new Set<string>();
@@ -40,35 +38,27 @@ export default function ProgramTable({ onEdit }: Props) {
     return set;
   }, [issues]);
 
+  // 复选框勾选即「参与构建」：选中态直接来源于持久化的 enabled 字段
+  const enabledIds = useMemo(() => programs.filter(p => p.enabled).map(p => p.id), [programs]);
+
   // 百分比等比缩放（tableLayout=fixed）：窗口变小时各列同比收窄，不隐藏任何列；操作列保底 9%
   const columns: ColumnsType<Program> = useMemo(() => [
     {
-      title: t('table.name'), dataIndex: 'name', width: '13%', ellipsis: { showTitle: false },
+      title: t('table.name'), dataIndex: 'name', width: '14%', ellipsis: { showTitle: false },
       render: (_, r) => (
         <Tooltip title={r.name} placement="topLeft">
           <span>
             <span style={{ fontWeight: 500 }}>{r.name}</span>
-            {issueSet.has(r.id) && <WarningOutlined style={{ color: '#faad14' }} />}
+            {issueSet.has(r.id) && <WarningFilled style={{ color: '#faad14' }} />}
           </span>
         </Tooltip>
       ),
     },
+    { title: t('table.image'), dataIndex: 'image', width: '16%', ellipsis: { showTitle: false }, render: (_, r) => <Tooltip title={`${r.image}:${r.defaultVersion}`} placement="topLeft"><span style={{ fontFamily:'monospace', fontSize:12 }}>{r.image}:{r.defaultVersion}</span></Tooltip> },
+    { title: t('table.dockerfile'), dataIndex: 'dockerfile', width: '23%', ellipsis:{ showTitle:false }, render: (v:string) => <Tooltip title={v}><span style={{ fontFamily:'monospace', fontSize:12 }}>{v}</span></Tooltip> },
+    { title: t('table.status'), width: '18%', render: (_, r) => <StatusTags ev={statuses[r.id]} /> },
     {
-      title: t('form.enabled'), dataIndex: 'enabled', width: '7%', align: 'center',
-      render: (_, r) => (
-        <Checkbox checked={r.enabled} disabled={running}
-          onChange={async e => {
-            const ok = await upsertProgram(selectedProjectId!, { ...r, enabled: e.target.checked });
-            if (!ok) { message.warning(t('errors.saveBlocked')); return; }
-            if (!e.target.checked) setSelected(useStore.getState().selectedIds.filter(id => id !== r.id));
-          }} />
-      ),
-    },
-    { title: t('table.image'), dataIndex: 'image', width: '15%', ellipsis: { showTitle: false }, render: (_, r) => <Tooltip title={`${r.image}:${r.defaultVersion}`} placement="topLeft"><span style={{ fontFamily:'monospace', fontSize:12 }}>{r.image}:{r.defaultVersion}</span></Tooltip> },
-    { title: t('table.dockerfile'), dataIndex: 'dockerfile', width: '21%', ellipsis:{ showTitle:false }, render: (v:string) => <Tooltip title={v}><span style={{ fontFamily:'monospace', fontSize:12 }}>{v}</span></Tooltip> },
-    { title: t('table.status'), width: '17%', render: (_, r) => <StatusTags ev={statuses[r.id]} /> },
-    {
-      title: t('table.lastBuild'), width: '11%',
+      title: t('table.lastBuild'), width: '13%',
       render: (_, r) => {
         const lb = r.lastBuild;
         if (!lb) return <Typography.Text type="secondary">—</Typography.Text>;
@@ -79,12 +69,12 @@ export default function ProgramTable({ onEdit }: Props) {
       title: t('table.actions'), width: '9%',
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" type="text" icon={<EditOutlined />} disabled={running} onClick={() => onEdit(r)} />
+          <Button size="small" type="text" icon={<EditFilled />} disabled={running} onClick={() => onEdit(r)} />
           <Popconfirm title={t('table.deleteConfirm')} onConfirm={async () => {
             const ok = await removeProgram(selectedProjectId!, r.id);
             if (!ok) message.warning(t('errors.saveBlocked'));
           }} okText={t('common.ok')} cancelText={t('common.cancel')}>
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} disabled={running} />
+            <Button size="small" type="text" danger icon={<DeleteFilled />} disabled={running} />
           </Popconfirm>
         </Space>
       ),
@@ -97,7 +87,15 @@ export default function ProgramTable({ onEdit }: Props) {
         <Table<Program>
           size="small" rowKey="id" columns={columns} dataSource={programs} pagination={false} tableLayout="fixed"
           locale={{ emptyText: <Empty description={t('table.empty')} style={{ padding:'36px 0' }} /> }}
-          rowSelection={{ selectedRowKeys: selectedIds, onChange: keys => setSelected(keys.map(String)), getCheckboxProps: r => ({ disabled: !r.enabled }) }}
+          rowSelection={{
+            selectedRowKeys: enabledIds,
+            onChange: keys => {
+              if (!selectedProjectId) return;
+              void setProgramsEnabled(selectedProjectId, keys.map(String))
+                .then(ok => { if (!ok) message.warning(t('errors.saveBlocked')); });
+            },
+            getCheckboxProps: () => ({ disabled: running }),
+          }}
         />
       </div>
     </div>

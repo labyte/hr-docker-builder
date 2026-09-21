@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { App, Button, Space, Tooltip } from 'antd';
-import { FolderOpenOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { FolderOpenFilled, PlusOutlined, ThunderboltFilled } from '@ant-design/icons';
 import { useStore } from '../store';
 import { errText } from '../utils';
 import { api } from '../api';
@@ -63,7 +63,7 @@ export default function Toolbar({ onAddProgram }: Props) {
             }}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid #d9d9d9', borderRadius: 8, padding: '2px 10px', fontSize: 12, background: '#fff', maxWidth: 260, verticalAlign: 'middle' }}
           >
-            <FolderOpenOutlined style={{ color: '#fa8c16', flexShrink: 0 }} />
+            <FolderOpenFilled style={{ color: '#fa8c16', flexShrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortExportPath}</span>
           </a>
         </Tooltip>
@@ -76,7 +76,7 @@ export default function Toolbar({ onAddProgram }: Props) {
 
       <Space className="toolbar-actions">
         {!running ? (
-          <Button type="primary" icon={<ThunderboltOutlined />} disabled={!selectedId} onClick={async () => { const err = await startBuild(); if (err) message.error(errText(err)); }}>{t('toolbar.build')}</Button>
+          <Button type="primary" icon={<ThunderboltFilled />} disabled={!selectedId} onClick={async () => { const err = await startBuild(); if (err) message.error(errText(err)); }}>{t('toolbar.build')}</Button>
         ) : (
           <Button danger onClick={async () => { await cancelBuild(); }}>{t('toolbar.cancel')}</Button>
         )}

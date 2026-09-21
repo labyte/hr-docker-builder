@@ -15,6 +15,17 @@ use crate::types::{BuildTask, QueueDone, StartBuildRequest, StatusEvent};
 struct Counts { success: AtomicUsize, failed: AtomicUsize, canceled: AtomicUsize, skipped: AtomicUsize }
 
 pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
+    // panic 兜底：run() 以任何路径退出（含 panic）都释放队列锁，避免应用永久卡在 queue_running
+    struct QueueGuard(AppHandle);
+    impl Drop for QueueGuard {
+        fn drop(&mut self) {
+            if let Some(state) = self.0.try_state::<AppState>() {
+                if let Ok(mut q) = state.queue_cancel.lock() { *q = None; }
+            }
+        }
+    }
+    let _queue_guard = QueueGuard(app.clone());
+
     let (global, project, cancel) = {
         let state = app.state::<AppState>();
         let cfg = state.config.lock().unwrap().clone();
@@ -122,9 +133,12 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
         export_files: std::mem::take(&mut *export_files.lock().unwrap()),
         log_dir: log_dir.to_string_lossy().to_string(),
     };
+    // 先解锁再发 queue-done：前端收到完成事件后立即开始下一队列/保存配置时不会被误拒
+    {
+        let state = app.state::<AppState>();
+        *state.queue_cancel.lock().unwrap() = None;
+    }
     let _ = app.emit("queue-done", &done);
-    let state = app.state::<AppState>();
-    *state.queue_cancel.lock().unwrap() = None;
 }
 
 fn save_history(app: &AppHandle, task: &BuildTask, tag: &str, ok: bool) {

@@ -222,6 +222,15 @@ pub struct EnvInfo {
     pub host_arch: String,
 }
 
+// ── 配置损坏通知（load 时记录，get_config 冲刷为 config-corrupt 事件给前端弹窗）──
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigCorruptEvent {
+    pub path: String,
+    pub backup: String,
+    pub error: String,
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PathIssue {

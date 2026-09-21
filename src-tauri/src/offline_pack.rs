@@ -166,31 +166,37 @@ pub async fn export_pack(
         pull_image(img).await?;
     }
 
-    // 4. 启动临时本地 registry（每个上游一个，端口 5000+i）
-    for r in regs.values() {
-        let name = format!("hr-offline-reg-{}", r.index);
-        run_ignore(&["rm", "-f", &name]).await;
-        let bind = format!("{}:{}:5000", publish_bind(), r.port);
-        run_ok(&["run", "-d", "--name", &name, "-p", &bind, "registry:2"])
-            .await.map_err(|e| format!("启动本地 registry 失败: {e}"))?;
-    }
+    // 4-6. 启动临时 registry → 多架构复制 → 导出卷数据；
+    // 任何一步成败都最终清理临时容器（防止失败早退后容器与端口泄漏占用）
+    let mirrored = async {
+        // 4. 启动临时本地 registry（每个上游一个，端口 5000+i）
+        for r in regs.values() {
+            let name = format!("hr-offline-reg-{}", r.index);
+            run_ignore(&["rm", "-f", &name]).await;
+            let bind = format!("{}:{}:5000", publish_bind(), r.port);
+            run_ok(&["run", "-d", "--name", &name, "-p", &bind, "registry:2"])
+                .await.map_err(|e| format!("启动本地 registry 失败: {e}"))?;
+        }
 
-    // 5. 多架构复制：imagetools 把 manifest list + 全部平台 blobs 原样推入本地 registry
-    for (orig, host, path) in &mirrorable {
-        let r = &regs[host];
-        let target = format!("localhost:{}/{}", r.port, path);
-        emit_line(app, run_id, &format!("复制多架构 {orig} → {target}"), "stdout");
-        run_ok(&["buildx", "imagetools", "create", "-t", &target, orig]).await?;
-    }
+        // 5. 多架构复制：imagetools 把 manifest list + 全部平台 blobs 原样推入本地 registry
+        for (orig, host, path) in &mirrorable {
+            let r = &regs[host];
+            let target = format!("localhost:{}/{}", r.port, path);
+            emit_line(app, run_id, &format!("复制多架构 {orig} → {target}"), "stdout");
+            run_ok(&["buildx", "imagetools", "create", "-t", &target, orig]).await?;
+        }
 
-    // 6. 导出 registry 卷数据
-    for r in regs.values() {
-        let name = format!("hr-offline-reg-{}", r.index);
-        let out = dir.join("registry-data").join(r.index.to_string());
-        fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-        run_ok(&["cp", &format!("{name}:/var/lib/registry/."), out.to_str().unwrap_or(".")]).await?;
-    }
+        // 6. 导出 registry 卷数据
+        for r in regs.values() {
+            let name = format!("hr-offline-reg-{}", r.index);
+            let out = dir.join("registry-data").join(r.index.to_string());
+            fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            run_ok(&["cp", &format!("{name}:/var/lib/registry/."), out.to_str().ok_or("导出路径含非法字符")?]).await?;
+        }
+        Ok::<(), String>(())
+    }.await;
     for r in regs.values() { run_ignore(&["rm", "-f", &format!("hr-offline-reg-{}", r.index)]).await; }
+    mirrored?;
 
     // 7. images.tar：工具镜像 + 基础镜像（本机架构，docker load 用）
     let tar = dir.join("images.tar");
