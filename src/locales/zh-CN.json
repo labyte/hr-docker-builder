@@ -19,6 +19,9 @@
     "cancel": "取消构建",
     "settings": "设置",
     "about": "关于",
+    "editInProject": "只读展示：在项目设置（左侧 ✎）中修改",
+    "noOutputs": "未选去向",
+    "openExportDir": "打开导出目录",
     "refreshEnv": "刷新环境",
     "language": "语言",
     "exportPack": "导出离线包",
@@ -36,7 +39,14 @@
     "programs": "个程序",
     "exportDir": "镜像导出目录（留空则使用默认）"
   },
+  "export": {
+    "scopeTitle": "导出离线包 · 范围",
+    "scopeAll": "全部项目（默认）",
+    "scopeCurrent": "仅当前项目",
+    "scopeHint": "离线机按包内清单导入，与导出范围选择无关"
+  },
   "env": {
+    "checking": "正在检测 Docker 环境…",
     "ok": "Docker 环境正常（builder: {{builder}}，平台: {{platforms}}）",
     "dockerMissing": "未检测到 docker，请先安装 Docker Desktop / Engine（检测中，就绪后自动恢复）",
     "buildxMissing": "未检测到 buildx 组件，请升级 Docker 或启用 buildx 插件",
@@ -150,12 +160,8 @@
   "about": {
     "title": "关于",
     "desc": "面向 .NET 团队的跨平台 Docker 批量构建工具：多项目队列构建、amd64/arm64 交叉构建、产物导出 tar / 本地加载 / 推送 Registry、实时日志与内网离线支持。",
-    "repo": "代码仓库",
-    "releases": "版本下载",
     "stack": "技术栈",
-    "copyright": "© 2026 HR Team · 内部工具",
-    "copyLink": "复制链接",
-    "copied": "已复制到剪贴板"
+    "copyright": "© 2026 HR Team · 内部工具"
   },
   "common": {
     "ok": "确定",

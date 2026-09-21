@@ -97,6 +97,19 @@ pub fn cancel_build(state: State<AppState>) {
     if let Some(flag) = state.queue_cancel.lock().unwrap().as_ref() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
 }
 
+/// 解析当前生效的导出目录：项目设置了就用它，否则数据根目录/exports；确保存在后返回
+#[tauri::command]
+pub fn get_export_dir(app: AppHandle, state: State<'_, AppState>, export_dir: String) -> Result<String, String> {
+    let dir = if !export_dir.trim().is_empty() {
+        export_dir.trim().to_string()
+    } else {
+        let root = effective_root(&app, &state.config.lock().unwrap().global);
+        root.join("exports").to_string_lossy().to_string()
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    Ok(dir)
+}
+
 #[tauri::command]
 pub fn reveal_path(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
@@ -113,9 +126,21 @@ pub fn reveal_path(path: String) -> Result<(), String> {
 // ── 离线依赖包 ──
 
 #[tauri::command]
-pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, dest_dir: String) -> Result<String, String> {
+pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, dest_dir: String, project_id: Option<String>) -> Result<String, String> {
     let cfg = state.config.lock().unwrap().clone();
-    let dockerfiles: Vec<String> = cfg.projects.iter()
+    // 范围：指定项目则仅收集该项目的 Dockerfile，否则全部项目
+    let scope_label = match &project_id {
+        Some(pid) => {
+            let prj = cfg.projects.iter().find(|p| &p.id == pid).ok_or_else(|| format!("project_not_found:{pid}"))?;
+            format!("项目「{}」", prj.name)
+        }
+        None => "全项目".into(),
+    };
+    let scope_projects = match &project_id {
+        Some(pid) => cfg.projects.iter().filter(|p| &p.id == pid).collect::<Vec<_>>(),
+        None => cfg.projects.iter().collect::<Vec<_>>(),
+    };
+    let dockerfiles: Vec<String> = scope_projects.iter()
         .flat_map(|p| p.programs.iter())
         .filter(|p| !p.dockerfile.is_empty())
         .map(|p| p.dockerfile.clone())
@@ -129,7 +154,7 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
         use crate::types::{LogEvent, QueueDone};
         match offline_pack::export_pack(&app2, dockerfiles, &did, &rid2).await {
             Ok(m) => {
-                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("成功: {} 个镜像（含多架构 mirror 数据）→ {}/offline-pack", m.images.len(), did.trim_end_matches('/')), stream: "stdout".into() });
+                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("成功[{scope_label}]: {} 个镜像（含多架构 mirror 数据）→ {}/offline-pack", m.images.len(), did.trim_end_matches('/')), stream: "stdout".into() });
                 let _ = app2.emit("queue-done", QueueDone { success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack", did.trim_end_matches('/'))], log_dir: dest_dir.clone() });
             }
             Err(e) => {

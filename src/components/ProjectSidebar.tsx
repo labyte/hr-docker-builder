@@ -1,13 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Input, List, Modal, Popconfirm, Tooltip, Typography } from 'antd';
+import { App, Button, Checkbox, Input, List, Modal, Popconfirm, Segmented, Tooltip, Typography } from 'antd';
 import { AppstoreOutlined, CloudUploadOutlined, CopyOutlined, DeleteOutlined, DesktopOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
-import type { Project } from '../types';
+import type { Outputs, Project } from '../types';
+
+const OUTPUT_KEYS: (keyof Outputs)[] = ['exportFile', 'loadLocal', 'push'];
+const defaultOutputs = (): Outputs => ({ exportFile: true, loadLocal: false, push: false });
+
+const fmtDate = (iso: string, lang: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(+d)) return '';
+  if (lang.startsWith('zh')) return `${String(d.getFullYear()).slice(2)}年${d.getMonth() + 1}月${d.getDate()}日`;
+  return d.toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' });
+};
 
 export default function ProjectSidebar() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { message } = App.useApp();
   const projects = useStore((s) => s.config.projects);
   const selectedId = useStore((s) => s.selectedProjectId);
@@ -73,9 +84,17 @@ export default function ProjectSidebar() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, paddingLeft: 23 }}>
                 <span style={{ fontSize: 10, fontWeight: 600, color: archColor(p.defaultArch), background: `${archColor(p.defaultArch)}18`, padding: '1px 5px', borderRadius: 3 }}>{p.defaultArch}</span>
                 <span style={{ fontSize: 11, color: '#999', display:'inline-flex', alignItems:'center', gap:4 }}>{outputIcon(p)}</span>
+                {p.createdAt && <span style={{ fontSize: 10, color: '#bbb', marginLeft: 'auto' }}>{fmtDate(p.createdAt, i18n.language)}</span>}
               </div>
-              {hovered === p.id && (
-                <div style={{ position: 'absolute', right: 2, top: 4, display: 'flex', background: sel ? '#e6f4ff' : '#fafbfc', borderRadius: 4 }}>
+              {/* 常驻挂载 + 透明度过渡：条件渲染会在鼠标移向 Popconfirm 时
+                  触发 mouseleave 卸载锚点，导致确认框自动关闭无法点击 */}
+              <div style={{
+                position: 'absolute', right: 2, top: 4, display: 'flex',
+                background: sel ? '#e6f4ff' : '#fafbfc', borderRadius: 4,
+                opacity: hovered === p.id ? 1 : 0,
+                pointerEvents: hovered === p.id ? 'auto' : 'none',
+                transition: 'opacity .15s',
+              }}>
                   <Tooltip title={t('sidebar.copy')}>
                     <Button size="small" type="text" icon={<CopyOutlined style={{ fontSize: 12 }} />}
                       onClick={async (e) => { e.stopPropagation(); const c = await copyProject(p.id); if (c) { selectProject(c.id); message.success(t('sidebar.copied')); } }} />
@@ -89,7 +108,6 @@ export default function ProjectSidebar() {
                       onClick={(e) => e.stopPropagation()} />
                   </Popconfirm>
                 </div>
-              )}
             </div>
           );
         }}
@@ -109,12 +127,19 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
   const { t } = useTranslation();
   const [name, setName] = useState('');
   const [exportDir, setExportDir] = useState('');
+  const [arch, setArch] = useState('amd64');
+  const [outputs, setOutputs] = useState<Outputs>(defaultOutputs());
 
   useEffect(() => {
     if (!open) return;
     setName(initial?.name ?? '');
     setExportDir(initial?.exportDir ?? '');
+    setArch(initial?.defaultArch ?? 'amd64');
+    setOutputs(initial?.outputs ?? defaultOutputs());
   }, [open, initial]);
+
+  const reset = () => { setName(''); setExportDir(''); setArch('amd64'); setOutputs(defaultOutputs()); };
+  const checkedOutputs = OUTPUT_KEYS.filter(k => outputs[k]).map(String);
 
   return (
     <Modal
@@ -122,18 +147,43 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
       title={initial ? t('sidebar.editProject') : t('sidebar.newProject')}
       onOk={async () => {
         const p: Project = initial
-          ? { ...initial, name: name || initial.name, exportDir }
-          : { id: `prj-${Date.now().toString(36)}`, name: name || t('sidebar.projectName'), defaultArch: 'amd64', outputs: { exportFile: true, loadLocal: false, push: false }, exportDir, programs: [] };
+          ? { ...initial, name: name || initial.name, exportDir, defaultArch: arch, outputs }
+          : { id: `prj-${Date.now().toString(36)}`, name: name || t('sidebar.projectName'), createdAt: new Date().toISOString(), defaultArch: arch, outputs, exportDir, programs: [] };
         await onSave(p);
-        setName('');
-        setExportDir('');
+        reset();
         onClose();
       }}
-      onCancel={() => { setName(''); setExportDir(''); onClose(); }}
+      onCancel={() => { reset(); onClose(); }}
       okText={t('common.save')}
       cancelText={t('common.cancel')}
     >
       <Input placeholder={t('sidebar.projectName')} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      <div style={{ marginTop: 14 }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('toolbar.arch')}</Typography.Text>
+        <div>
+          <Segmented value={arch} onChange={v => setArch(String(v))}
+            options={[
+              { label: t('toolbar.amd64'), value: 'amd64' },
+              { label: t('toolbar.arm64'), value: 'arm64' },
+              { label: t('toolbar.both'), value: 'both' },
+            ]} />
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('toolbar.outputs')}</Typography.Text>
+        <div>
+          <Checkbox.Group
+            value={checkedOutputs}
+            onChange={v => {
+              const next = defaultOutputs();
+              next.exportFile = next.loadLocal = next.push = false;
+              for (const key of v as string[]) { if (key in next) next[key as keyof Outputs] = true; }
+              setOutputs(next);
+            }}
+            options={OUTPUT_KEYS.map(k => ({ label: t(`toolbar.${k}`), value: k }))}
+          />
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
         <Input placeholder={t('sidebar.exportDir')} value={exportDir} onChange={(e) => setExportDir(e.target.value)} style={{ flex: 1 }} />
         <Button icon={<FolderOpenOutlined />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setExportDir(d); }}>

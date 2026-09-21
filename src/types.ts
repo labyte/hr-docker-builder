@@ -18,6 +18,8 @@ export interface GlobalSettings {
 export interface Project {
   id: string;
   name: string;
+  /** 创建时间 ISO 字符串；旧数据可为空 */
+  createdAt: string;
   defaultArch: string;
   outputs: Outputs;
   exportDir: string;

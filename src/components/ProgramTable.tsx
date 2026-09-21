@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { DeleteOutlined, EditOutlined, PlusOutlined, WarningOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../store';
 import type { Program, StatusEvent } from '../types';
@@ -18,9 +18,9 @@ function StatusTags({ ev }: { ev?: Record<string, StatusEvent> }) {
   ))}</Space>;
 }
 
-interface Props { onAdd: () => void; onEdit: (p: Program) => void }
+interface Props { onEdit: (p: Program) => void }
 
-export default function ProgramTable({ onAdd, onEdit }: Props) {
+export default function ProgramTable({ onEdit }: Props) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const selectedProjectId = useStore(s => s.selectedProjectId);
@@ -79,10 +79,7 @@ export default function ProgramTable({ onAdd, onEdit }: Props) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <div style={{ padding:'8px 12px', borderBottom:'1px solid #f0f0f0' }}>
-        <Button type="primary" ghost icon={<PlusOutlined />} onClick={onAdd} disabled={running || !selectedProjectId}>{t('table.add')}</Button>
-      </div>
-      <div style={{ flex:1, overflow:'auto', padding:'0 12px 12px' }}>
+      <div style={{ flex:1, overflow:'auto', padding:'12px' }}>
         <Table<Program>
           size="small" rowKey="id" columns={columns} dataSource={programs} pagination={false}
           locale={{ emptyText: <Empty description={t('table.empty')} style={{ padding:'36px 0' }} /> }}

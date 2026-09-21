@@ -59,19 +59,16 @@ export default function Workbench() {
 
   return (
     <div className="page">
-      <EnvBanner />
+      <EnvBanner onOpenSettings={() => setSettingsOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ width: 240, flex: '0 0 240px', overflow: 'hidden' }}>
           <ProjectSidebar />
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <Toolbar onOpenSettings={() => setSettingsOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
+          <Toolbar onAddProgram={() => { setEditing(null); setFormOpen(true); }} />
           <div className="split" ref={splitRef}>
             <div className="left" style={{ height: topPx ?? '55%' }}>
-              <ProgramTable
-                onAdd={() => { setEditing(null); setFormOpen(true); }}
-                onEdit={(p) => { setEditing(p); setFormOpen(true); }}
-              />
+              <ProgramTable onEdit={(p) => { setEditing(p); setFormOpen(true); }} />
             </div>
             <div className="splitter"
               onPointerDown={e => { e.preventDefault(); draggingRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); }}

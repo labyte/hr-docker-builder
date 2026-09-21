@@ -49,6 +49,8 @@ impl Default for GlobalSettings {
 pub struct Project {
     pub id: String,
     pub name: String,
+    /// 创建时间（ISO 字符串；旧配置缺省为空，不显示）
+    pub created_at: String,
     /// 默认目标架构
     pub default_arch: String,
     pub outputs: Outputs,
@@ -61,6 +63,7 @@ impl Default for Project {
         Self {
             id: String::new(),
             name: String::new(),
+            created_at: String::new(),
             default_arch: "amd64".into(),
             outputs: Outputs::default(),
             export_dir: String::new(),

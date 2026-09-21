@@ -135,7 +135,10 @@ export const useStore = create<BuilderState>((set, get) => ({
   upsertProject: async (p) => {
     const s = get(); const exists = s.config.projects.some(x => x.id === p.id);
     const projects = exists ? s.config.projects.map(x => x.id === p.id ? p : x) : [...s.config.projects, p];
-    return s.persist({ ...s.config, projects });
+    const ok = await s.persist({ ...s.config, projects });
+    // 项目设置里改了架构/去向：即时同步工具条展示
+    if (ok && s.selectedProjectId === p.id) set({ arch: p.defaultArch, outputs: p.outputs });
+    return ok;
   },
   removeProject: async (id) => {
     const s = get();
@@ -145,7 +148,7 @@ export const useStore = create<BuilderState>((set, get) => ({
   },
   copyProject: async (id) => {
     const s = get(); const src = s.config.projects.find(p => p.id === id); if (!src) return null;
-    const clone: Project = { ...src, id: `prj-${Date.now().toString(36)}`, name: `${src.name} (副本)` };
+    const clone: Project = { ...src, id: `prj-${Date.now().toString(36)}`, name: `${src.name} (副本)`, createdAt: new Date().toISOString() };
     await s.upsertProject(clone); return clone;
   },
   upsertProgram: async (projectId, prog) => {

@@ -19,6 +19,9 @@
     "cancel": "Cancel",
     "settings": "Settings",
     "about": "About",
+    "editInProject": "Read-only · edit in project settings (✎ on the left)",
+    "noOutputs": "No output",
+    "openExportDir": "Open export folder",
     "refreshEnv": "Refresh env",
     "language": "Language",
     "exportPack": "Export offline pack",
@@ -36,7 +39,14 @@
     "programs": "programs",
     "exportDir": "Image export dir (empty = default)"
   },
+  "export": {
+    "scopeTitle": "Export offline pack · Scope",
+    "scopeAll": "All projects (default)",
+    "scopeCurrent": "Current project only",
+    "scopeHint": "Import on the offline machine is manifest-driven, independent of the export scope"
+  },
   "env": {
+    "checking": "Checking Docker environment…",
     "ok": "Docker env OK (builder: {{builder}}, platforms: {{platforms}})",
     "dockerMissing": "docker not found. Install Docker Desktop / Engine (auto-rechecks until ready)",
     "buildxMissing": "buildx not found. Upgrade Docker or enable the buildx plugin",
@@ -150,12 +160,8 @@
   "about": {
     "title": "About",
     "desc": "Cross-platform batch Docker image builder for .NET teams: queued multi-project builds, amd64/arm64 cross builds, tar export / local load / registry push, real-time logs and offline intranet support.",
-    "repo": "Repository",
-    "releases": "Downloads",
     "stack": "Stack",
-    "copyright": "© 2026 HR Team · Internal tool",
-    "copyLink": "Copy",
-    "copied": "Copied to clipboard"
+    "copyright": "© 2026 HR Team · Internal tool"
   },
   "common": {
     "ok": "OK",
