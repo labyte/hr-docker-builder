@@ -59,9 +59,9 @@ function CompactBar({ color, icon, label, actions, right }: { color: string; ico
   const bg = color === 'success' ? '#f6ffed' : color === 'warning' ? '#fffbe6' : '#fff2f0';
   const bd = color === 'success' ? '#b7eb8f' : color === 'warning' ? '#ffe58f' : '#ffa39e';
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 28, fontSize: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 38, fontSize: 12 }}>
       {/* 状态段：背景色只作用于 Docker 状态本身 */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '2px 12px', background: bg, borderBottom: `1px solid ${bd}` }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: bg, borderBottom: `1px solid ${bd}` }}>
         <span style={{ color: color === 'success' ? '#52c41a' : color === 'warning' ? '#faad14' : '#ff4d4f' }}>{icon}</span>
         <span style={{ flex: 1 }}>{label}</span>
         {actions && actions.length > 0 && <Space size={4}>{actions}</Space>}
@@ -69,7 +69,7 @@ function CompactBar({ color, icon, label, actions, right }: { color: string; ico
       </div>
       {/* 全局功能区：独立中性底，与状态解耦 */}
       {right && (
-        <div style={{ display: 'flex', alignItems: 'center', padding: '2px 12px', background: '#f7f8fa', borderLeft: '1px solid #ececf1', borderBottom: '1px solid #e5e6eb' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '6px 16px', background: '#f7f8fa', borderLeft: '1px solid #ececf1', borderBottom: '1px solid #e5e6eb' }}>
           {right}
         </div>
       )}

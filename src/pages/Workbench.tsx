@@ -14,6 +14,10 @@ const PX_KEY = 'split-px';
 const MIN_TOP = 120;
 const MIN_BOT = 160;
 const SPLITTER_H = 12;
+const SB_KEY = 'sidebar-px';
+const SB_MIN = 180;
+const SB_MAX = 420;
+const SB_DEF = 240;
 
 export default function Workbench() {
   const refreshEnv = useStore((s) => s.refreshEnv);
@@ -21,6 +25,14 @@ export default function Workbench() {
   const [editing, setEditing] = useState<Program | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  const mainRef = useRef<HTMLDivElement>(null);
+  const [sidebarPx, setSidebarPx] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(SB_KEY));
+    return saved >= SB_MIN && saved <= SB_MAX ? saved : SB_DEF;
+  });
+  const draggingVRef = useRef(false);
+  const clampSidebar = (x: number) => Math.round(Math.min(SB_MAX, Math.max(SB_MIN, x - (mainRef.current?.getBoundingClientRect().left ?? 0))));
 
   const splitRef = useRef<HTMLDivElement>(null);
   const [topPx, setTopPx] = useState<number | null>(() => {
@@ -60,10 +72,17 @@ export default function Workbench() {
   return (
     <div className="page">
       <EnvBanner onOpenSettings={() => setSettingsOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div style={{ width: 240, flex: '0 0 240px', overflow: 'hidden' }}>
+      <div ref={mainRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <div style={{ width: sidebarPx, flex: `0 0 ${sidebarPx}px`, overflow: 'hidden' }}>
           <ProjectSidebar />
         </div>
+        <div className="vsplitter"
+          onPointerDown={e => { e.preventDefault(); draggingVRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); }}
+          onPointerMove={e => { if (draggingVRef.current) setSidebarPx(clampSidebar(e.clientX)); }}
+          onPointerUp={e => { if (!draggingVRef.current) return; draggingVRef.current = false; e.currentTarget.releasePointerCapture(e.pointerId); localStorage.setItem(SB_KEY, String(sidebarPx)); }}
+          onDoubleClick={() => { setSidebarPx(SB_DEF); localStorage.removeItem(SB_KEY); }}
+          title="拖动调整 / 双击复位"
+        ><span className="vsplitter-grip" /></div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <Toolbar onAddProgram={() => { setEditing(null); setFormOpen(true); }} />
           <div className="split" ref={splitRef}>

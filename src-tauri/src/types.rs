@@ -28,6 +28,10 @@ pub struct GlobalSettings {
     pub fail_fast: bool,
     /// 数据目录（projects/logs/exports/offline）；留空使用系统默认应用数据目录
     pub data_dir: String,
+    /// 构建参数预设（每行一条 KEY=VALUE），全项目可用，程序表单中点选
+    pub build_arg_presets: Vec<String>,
+    /// 离线 NuGet 包目录（全局）；空则回退程序级旧字段（兼容历史配置）
+    pub nuget_packages_dir: String,
 }
 impl Default for GlobalSettings {
     fn default() -> Self {
@@ -39,6 +43,8 @@ impl Default for GlobalSettings {
             concurrency: 1,
             fail_fast: false,
             data_dir: String::new(),
+            build_arg_presets: vec![],
+            nuget_packages_dir: String::new(),
         }
     }
 }
@@ -56,6 +62,8 @@ pub struct Project {
     pub outputs: Outputs,
     /// 该项目专属的镜像导出目录（为空则继承全局设置）
     pub export_dir: String,
+    /// 项目级构建上下文目录：程序未单独设置 context 时跟随此处
+    pub context_dir: String,
     pub programs: Vec<Program>,
 }
 impl Default for Project {
@@ -67,6 +75,7 @@ impl Default for Project {
             default_arch: "amd64".into(),
             outputs: Outputs::default(),
             export_dir: String::new(),
+            context_dir: String::new(),
             programs: vec![],
         }
     }
@@ -97,7 +106,7 @@ impl Default for Program {
             dockerfile: String::new(),
             context: String::new(),
             image: String::new(),
-            default_version: "0.1.0".into(),
+            default_version: "latest".into(),
             build_args: HashMap::new(),
             enabled: true,
             nuget_packages_dir: String::new(),
@@ -150,6 +159,10 @@ pub struct BuildTask {
     pub arch: String,
     /// 宿主架构；与 arch 相同时走 default builder（FROM 优先解析本机镜像）
     pub host_arch: String,
+    /// 全局离线 NuGet 目录（空则回退 program 级旧字段）
+    pub nuget_packages_dir: String,
+    /// 项目级构建上下文（program.context 为空时使用）
+    pub project_context_dir: String,
     pub registry: String,
     pub builder_name: String,
     pub tag_template: String,

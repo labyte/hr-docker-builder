@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Button, Empty, Space, Switch, Tabs, Tooltip, Typography } from 'antd';
-import { FolderOpenOutlined, ExportOutlined } from '@ant-design/icons';
+import { Button, Empty, Space, Switch, Tabs, Tooltip, Typography } from 'antd';
+import { FolderOpenOutlined } from '@ant-design/icons';
 import { api } from '../api';
 import { useStore } from '../store';
 import type { LogLine } from '../types';
@@ -75,35 +75,13 @@ export default function LogPanel() {
             </Button>
           </Tooltip>
         )}
+        {/* 结果汇总行内展示（导出文件入口在工具条的目录链接，不再重复列出） */}
+        {summary && (
+          <Typography.Text type={summary.failed > 0 ? 'danger' : 'success'} style={{ fontSize: 12 }}>
+            {t('log.summary', { success: summary.success, failed: summary.failed, canceled: summary.canceled, skipped: summary.skipped })}
+          </Typography.Text>
+        )}
       </Space>
-      {summary && (
-        <Alert
-          style={{ marginBottom: 8 }}
-          type={summary.failed > 0 ? 'warning' : 'success'}
-          showIcon
-          message={t('log.summary', {
-            success: summary.success,
-            failed: summary.failed,
-            canceled: summary.canceled,
-            skipped: summary.skipped,
-          })}
-          description={
-            summary.exportFiles.length > 0 ? (
-              <div>
-                <Typography.Text type="secondary">{t('log.exported')}</Typography.Text>
-                {summary.exportFiles.map((f) => (
-                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>{f}</span>
-                    <Button size="small" type="link" icon={<ExportOutlined />} onClick={() => void api.revealPath(f)}>
-                      {t('log.reveal')}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : undefined
-          }
-        />
-      )}
       <div style={{ flex: 1, minHeight: 0 }}>
         {allLogs.length === 0 && !summary ? (
           <div className="log" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

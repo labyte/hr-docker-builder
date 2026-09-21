@@ -11,7 +11,7 @@ export const defaultOutputs = (): Outputs => ({ exportFile: true, loadLocal: fal
 
 const defaultConfig = (): AppConfig => ({
   version: 1,
-  global: { language: 'auto', registry: '', builderName: 'hr-builder', tagTemplate: '{version}-{arch}-{time}', concurrency: 1, failFast: false, dataDir: '' },
+  global: { language: 'auto', registry: '', builderName: 'hr-builder', tagTemplate: '{version}-{arch}-{time}', concurrency: 1, failFast: false, dataDir: '', buildArgPresets: [], nugetPackagesDir: '' },
   projects: [],
 });
 
@@ -173,8 +173,11 @@ export const useStore = create<BuilderState>((set, get) => ({
     if (!s.outputs.exportFile && !s.outputs.loadLocal && !s.outputs.push) return 'no_outputs';
     const arches = s.arch === 'both' ? ['amd64', 'arm64'] : [s.arch];
     const prj = s.config.projects.find(p => p.id === s.selectedProjectId);
+    // 只构建勾选且「参与构建」的程序
+    const programIds = (prj?.programs ?? []).filter(p => s.selectedIds.includes(p.id) && p.enabled).map(p => p.id);
+    if (!programIds.length) return 'no_projects';
     try {
-      await api.startBuild({ programIds: s.selectedIds, projectId: s.selectedProjectId!, arches, outputs: s.outputs, concurrency: s.concurrency, failFast: s.failFast, exportDir: prj?.exportDir ?? '' });
+      await api.startBuild({ programIds, projectId: s.selectedProjectId!, arches, outputs: s.outputs, concurrency: s.concurrency, failFast: s.failFast, exportDir: prj?.exportDir ?? '' });
       set({ running: true, summary: null, statuses: {} });
       return null;
     } catch (e) { return String(e); }

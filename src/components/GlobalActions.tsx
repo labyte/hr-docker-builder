@@ -49,7 +49,7 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
 
   return (
     <>
-      <Space size={12}>
+      <Space size={16}>
         <Tooltip title={t('toolbar.exportPack')}>
           <Button shape="circle" size="small" style={btnStyle}
             icon={<span style={lift('#1677ff')}><CloudUploadOutlined /></span>} loading={offlineBusy} onClick={() => setScopeOpen(true)} />

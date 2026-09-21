@@ -61,9 +61,10 @@ pub async fn execute(
     for (k, v) in &task.program.build_args {
         args.extend(["--build-arg".into(), format!("{k}={v}")]);
     }
-    if !task.program.nuget_packages_dir.is_empty() {
+    let nuget_dir = if !task.nuget_packages_dir.is_empty() { task.nuget_packages_dir.as_str() } else { task.program.nuget_packages_dir.as_str() };
+    if !nuget_dir.is_empty() {
         args.push("--build-arg".into());
-        args.push(format!("NUGET_PACKAGES={}", task.program.nuget_packages_dir));
+        args.push(format!("NUGET_PACKAGES={}", nuget_dir));
     }
     if let Some(tar) = &tar_path {
         if let Some(parent) = std::path::Path::new(tar).parent() { let _ = std::fs::create_dir_all(parent); }
@@ -79,7 +80,10 @@ pub async fn execute(
             args.push("--push".into());
         }
     }
-    args.push(task.program.context.clone());
+    // 上下文：程序级优先，空则跟随项目设置
+    let context = if !task.program.context.trim().is_empty() { task.program.context.as_str() } else { task.project_context_dir.as_str() };
+    if context.trim().is_empty() { return Err(format!("context_invalid:{}", task.program.id)); }
+    args.push(context.into());
 
     let log_file = task.log_dir.join(format!("{}-{}.log", task.task_id, task.arch));
 
@@ -127,8 +131,10 @@ fn render_tag(template: &str, version: &str, arch: &str, time: &str) -> String {
 }
 
 pub fn export_path(export_dir: &str, image: &str, tag: &str) -> String {
-    let dir = if export_dir.trim().is_empty() { ".".into() } else { export_dir.trim_end_matches('/').to_string() };
-    format!("{dir}/{image}-{tag}.tar")
+    let dir = if export_dir.trim().is_empty() { ".".into() } else { export_dir.trim_end_matches(['/', '\\']).to_string() };
+    // 镜像名里的 "/"（如 hr/app）只属于镜像命名空间，文件名中转义为 "-"；镜像内 tag 不受影响
+    let safe = image.replace('/', "-");
+    format!("{dir}/{safe}-{tag}.tar")
 }
 
 async fn stream_cmd(

@@ -13,6 +13,10 @@ export interface GlobalSettings {
   failFast: boolean;
   /** 数据目录（projects/logs/exports），留空为系统默认 */
   dataDir: string;
+  /** 构建参数预设 KEY=VALUE，全项目可用 */
+  buildArgPresets: string[];
+  /** 离线 NuGet 包目录（全局） */
+  nugetPackagesDir: string;
 }
 
 export interface Project {
@@ -23,6 +27,8 @@ export interface Project {
   defaultArch: string;
   outputs: Outputs;
   exportDir: string;
+  /** 项目级构建上下文：程序未设置 context 时跟随此处 */
+  contextDir: string;
   programs: Program[];
 }
 

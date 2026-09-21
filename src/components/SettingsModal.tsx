@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Form, Input, InputNumber, Menu, Modal, Switch, Typography } from 'antd';
 import {
-  CloudServerOutlined, DatabaseOutlined, SettingOutlined, TagsOutlined, ThunderboltOutlined,
+  CloudServerOutlined, DatabaseOutlined, InboxOutlined, SettingOutlined, TagsOutlined, ThunderboltOutlined,
   FolderOpenOutlined,
 } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -10,7 +10,7 @@ import { useStore } from '../store';
 
 interface Props { open: boolean; onClose: () => void }
 
-type Section = 'build' | 'registry' | 'naming' | 'data';
+type Section = 'build' | 'registry' | 'naming' | 'data' | 'nuget';
 
 // Docker Desktop 风格：左侧分区菜单，右侧对应表单，各分区独立保存互不影响
 export default function SettingsModal({ open, onClose }: Props) {
@@ -21,17 +21,19 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [registryForm] = Form.useForm();
   const [namingForm] = Form.useForm();
   const [dataForm] = Form.useForm();
+  const [nugetForm] = Form.useForm();
   const global = useStore((s) => s.config.global);
   const saveGlobal = useStore((s) => s.saveGlobal);
 
   useEffect(() => {
     if (!open) return;
     setActive('build');
-    buildForm.setFieldsValue({ concurrency: global.concurrency, failFast: global.failFast });
+    buildForm.setFieldsValue({ concurrency: global.concurrency, failFast: global.failFast, buildArgPresets: (global.buildArgPresets ?? []).join('\n') });
     registryForm.setFieldsValue({ registry: global.registry });
     namingForm.setFieldsValue({ builderName: global.builderName, tagTemplate: global.tagTemplate });
     dataForm.setFieldsValue({ dataDir: global.dataDir });
-  }, [open, global, buildForm, registryForm, namingForm, dataForm]);
+    nugetForm.setFieldsValue({ nugetPackagesDir: global.nugetPackagesDir });
+  }, [open, global, buildForm, registryForm, namingForm, dataForm, nugetForm]);
 
   const saveSection = async (form: ReturnType<typeof Form.useForm>[0], patch: (v: any) => object) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,6 +56,7 @@ export default function SettingsModal({ open, onClose }: Props) {
       { key: 'registry', icon: <CloudServerOutlined />, label: t('settings.menuRegistry') },
       { key: 'naming', icon: <TagsOutlined />, label: t('settings.menuNaming') },
       { key: 'data', icon: <DatabaseOutlined />, label: t('settings.menuData') },
+      { key: 'nuget', icon: <InboxOutlined />, label: t('settings.menuNuget') },
     ],
     onClick: ({ key }: { key: string }) => setActive(key as Section),
   };
@@ -80,7 +83,10 @@ export default function SettingsModal({ open, onClose }: Props) {
               <Form.Item name="failFast" label={t('settings.failFast')} valuePropName="checked">
                 <Switch checkedChildren={t('toolbar.failFast')} unCheckedChildren={t('toolbar.failFastKeep')} />
               </Form.Item>
-              <SaveBtn primary onClick={() => void saveSection(buildForm, (v) => ({ concurrency: Number(v.concurrency ?? 1), failFast: !!v.failFast }))} />
+              <Form.Item name="buildArgPresets" label={t('settings.buildPresets')} extra={t('settings.buildPresetsHint')}>
+                <Input.TextArea rows={3} placeholder={'CONFIGURATION=Release\nNUGET_RESTORE=/ci/nuget'} style={{ fontFamily: 'monospace', fontSize: 12 }} />
+              </Form.Item>
+              <SaveBtn primary onClick={() => void saveSection(buildForm, (v) => ({ concurrency: Number(v.concurrency ?? 1), failFast: !!v.failFast, buildArgPresets: String(v.buildArgPresets ?? '').split('\n').map((l: string) => l.trim()).filter(Boolean) }))} />
             </Form>
           )}
 
@@ -126,6 +132,28 @@ export default function SettingsModal({ open, onClose }: Props) {
                 />
               </Form.Item>
               <SaveBtn primary onClick={() => void saveSection(dataForm, (v) => ({ dataDir: (v.dataDir ?? '').trim() }))} />
+            </Form>
+          )}
+
+          {active === 'nuget' && (
+            <Form form={nugetForm} layout="vertical">
+              {sectionTitle(t('settings.menuNuget'), t('settings.nugetDirHint'))}
+              <Form.Item name="nugetPackagesDir" label={t('settings.nugetDir')}>
+                <Input
+                  placeholder="/data/nuget-packages"
+                  allowClear
+                  addonAfter={
+                    <FolderOpenOutlined
+                      style={{ cursor: 'pointer' }}
+                      onClick={async () => {
+                        const dir = await openDialog({ directory: true });
+                        if (dir && typeof dir === 'string') nugetForm.setFieldsValue({ nugetPackagesDir: dir });
+                      }}
+                    />
+                  }
+                />
+              </Form.Item>
+              <SaveBtn primary onClick={() => void saveSection(nugetForm, (v) => ({ nugetPackagesDir: (v.nugetPackagesDir ?? '').trim() }))} />
             </Form>
           )}
 

@@ -44,14 +44,14 @@ body,
   flex-direction: column;
 }
 
+/* 常态隐形，悬停显形（透明热区仍可拖动） */
 .splitter {
   height: 12px;
   flex: 0 0 12px;
   cursor: row-resize;
   touch-action: none;
-  background: #f5f5f8;
-  border-top: 1px solid #e8e8ee;
-  border-bottom: 1px solid #e8e8ee;
+  background: transparent;
+  border-top: 1px solid #ececf1; /* 常态保留 1px 边界线，避免程序表与日志区粘连 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -65,9 +65,36 @@ body,
   width: 46px;
   height: 4px;
   border-radius: 2px;
-  background: #c3c9d5;
+  background: transparent;
+  transition: background 0.15s;
 }
 .splitter:hover .splitter-grip {
+  background: #7e93c4;
+}
+
+/* 竖向分割条：项目列表 ↔ 程序表格（同样常态隐形） */
+.vsplitter {
+  width: 10px;
+  flex: 0 0 10px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.vsplitter:hover {
+  background: #e6ecfa;
+}
+.vsplitter-grip {
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.vsplitter:hover .vsplitter-grip {
   background: #7e93c4;
 }
 

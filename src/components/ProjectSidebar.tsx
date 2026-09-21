@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Checkbox, Input, List, Modal, Popconfirm, Segmented, Tooltip, Typography } from 'antd';
-import { AppstoreOutlined, CloudUploadOutlined, CopyOutlined, DeleteOutlined, DesktopOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import { App, Button, Checkbox, Dropdown, Input, List, Modal, Segmented, Tooltip, Typography } from 'antd';
+import { CloudUploadOutlined, CopyOutlined, DeleteOutlined, DesktopOutlined, EditOutlined, FolderOpenOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import type { Outputs, Project } from '../types';
@@ -19,7 +19,7 @@ const fmtDate = (iso: string, lang: string) => {
 
 export default function ProjectSidebar() {
   const { t, i18n } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const projects = useStore((s) => s.config.projects);
   const selectedId = useStore((s) => s.selectedProjectId);
   const selectProject = useStore((s) => s.selectProject);
@@ -28,7 +28,6 @@ export default function ProjectSidebar() {
   const copyProject = useStore((s) => s.copyProject);
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
-  const [hovered, setHovered] = useState<string | null>(null);
 
   const archColor = (a: string) => a === 'amd64' ? '#1677ff' : a === 'arm64' ? '#52c41a' : '#722ed1';
 
@@ -55,60 +54,55 @@ export default function ProjectSidebar() {
         locale={{ emptyText: <span style={{ fontSize: 12, color: '#999' }}>{t('sidebar.empty')}</span> }}
         renderItem={(p) => {
           const sel = selectedId === p.id;
+          const menuItems = [
+            { key: 'copy', icon: <CopyOutlined />, label: t('sidebar.copy'),
+              onClick: async (info: { domEvent: React.MouseEvent | React.KeyboardEvent }) => {
+                info.domEvent.stopPropagation();
+                const c = await copyProject(p.id);
+                if (c) { selectProject(c.id); message.success(t('sidebar.copied')); }
+              } },
+            { key: 'edit', icon: <EditOutlined />, label: t('sidebar.editProject'),
+              onClick: () => { setEditing(p); setEditOpen(true); } },
+            { type: 'divider' as const },
+            { key: 'delete', icon: <DeleteOutlined />, label: t('table.delete'), danger: true,
+              onClick: () => modal.confirm({
+                title: t('sidebar.deleteConfirm', { name: p.name }), okText: t('common.ok'), cancelText: t('common.cancel'), okButtonProps: { danger: true },
+                onOk: async () => { const ok = await removeProject(p.id); if (!ok) message.warning(t('errors.saveBlocked')); },
+              }) },
+          ];
           return (
+            <Dropdown key={p.id} trigger={['contextMenu']} menu={{ items: menuItems }}>
             <div
               className="sidebar-item"
               onClick={() => selectProject(p.id)}
-              onMouseEnter={() => setHovered(p.id)}
-              onMouseLeave={() => setHovered(null)}
               style={{
-                cursor: 'pointer', padding: '8px 10px 6px 12px', position: 'relative',
+                cursor: 'pointer', padding: '8px 10px', position: 'relative',
                 margin: '0 8px 6px 8px',
-                border: sel ? '1px solid #91caff' : '1px solid #eee',
+                border: sel ? '2px solid #69b1ff' : '2px solid #e6e8ee',
                 borderRadius: 8,
                 background: sel ? '#e6f4ff' : '#fff',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AppstoreOutlined style={{ fontSize: 18, color: sel ? '#1677ff' : '#8c8c8c', flexShrink: 0 }} />
-                <Typography.Text
-                  ellipsis
-                  style={{ fontSize: 13, fontWeight: sel ? 600 : 400, lineHeight: '20px', flex: 1, minWidth: 0 }}
-                >
-                  {p.name}
-                </Typography.Text>
-                <span style={{ fontSize: 11, color: '#bbb', flexShrink: 0, marginLeft: 'auto' }}>
-                  {p.programs.length}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, paddingLeft: 23 }}>
-                <span style={{ fontSize: 10, fontWeight: 600, color: archColor(p.defaultArch), background: `${archColor(p.defaultArch)}18`, padding: '1px 5px', borderRadius: 3 }}>{p.defaultArch}</span>
-                <span style={{ fontSize: 11, color: '#999', display:'inline-flex', alignItems:'center', gap:4 }}>{outputIcon(p)}</span>
-                {p.createdAt && <span style={{ fontSize: 10, color: '#bbb', marginLeft: 'auto' }}>{fmtDate(p.createdAt, i18n.language)}</span>}
-              </div>
-              {/* 常驻挂载 + 透明度过渡：条件渲染会在鼠标移向 Popconfirm 时
-                  触发 mouseleave 卸载锚点，导致确认框自动关闭无法点击 */}
-              <div style={{
-                position: 'absolute', right: 2, top: 4, display: 'flex',
-                background: sel ? '#e6f4ff' : '#fafbfc', borderRadius: 4,
-                opacity: hovered === p.id ? 1 : 0,
-                pointerEvents: hovered === p.id ? 'auto' : 'none',
-                transition: 'opacity .15s',
-              }}>
-                  <Tooltip title={t('sidebar.copy')}>
-                    <Button size="small" type="text" icon={<CopyOutlined style={{ fontSize: 12 }} />}
-                      onClick={async (e) => { e.stopPropagation(); const c = await copyProject(p.id); if (c) { selectProject(c.id); message.success(t('sidebar.copied')); } }} />
-                  </Tooltip>
-                  <Tooltip title={t('common.edit')}>
-                    <Button size="small" type="text" icon={<EditOutlined style={{ fontSize: 12 }} />}
-                      onClick={(e) => { e.stopPropagation(); setEditing(p); setEditOpen(true); }} />
-                  </Tooltip>
-                  <Popconfirm title={t('sidebar.deleteConfirm')} onConfirm={async () => { const ok = await removeProject(p.id); if (!ok) message.warning(t('errors.saveBlocked')); }} okText={t('common.ok')} cancelText={t('common.cancel')}>
-                    <Button size="small" type="text" danger icon={<DeleteOutlined style={{ fontSize: 12 }} />}
-                      onClick={(e) => e.stopPropagation()} />
-                  </Popconfirm>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Typography.Text
+                      ellipsis
+                      style={{ fontSize: 13, fontWeight: sel ? 600 : 400, lineHeight: '20px', flex: 1, minWidth: 0 }}
+                    >
+                      {p.name}
+                    </Typography.Text>
+                    <span style={{ fontSize: 11, color: '#bbb', flexShrink: 0, marginLeft: 'auto' }}>
+                      {p.programs.length}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 7 }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: archColor(p.defaultArch), background: `${archColor(p.defaultArch)}18`, padding: '1px 5px', borderRadius: 3 }}>{p.defaultArch}</span>
+                    <span style={{ fontSize: 11, color: '#999', display:'inline-flex', alignItems:'center', gap:4 }}>{outputIcon(p)}</span>
+                    {p.createdAt && <span style={{ fontSize: 10, color: '#bbb', marginLeft: 'auto' }}>{fmtDate(p.createdAt, i18n.language)}</span>}
+                  </div>
                 </div>
             </div>
+            </Dropdown>
           );
         }}
       />
@@ -127,6 +121,7 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
   const { t } = useTranslation();
   const [name, setName] = useState('');
   const [exportDir, setExportDir] = useState('');
+  const [contextDir, setContextDir] = useState('');
   const [arch, setArch] = useState('amd64');
   const [outputs, setOutputs] = useState<Outputs>(defaultOutputs());
 
@@ -134,11 +129,12 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
     if (!open) return;
     setName(initial?.name ?? '');
     setExportDir(initial?.exportDir ?? '');
+    setContextDir(initial?.contextDir ?? '');
     setArch(initial?.defaultArch ?? 'amd64');
     setOutputs(initial?.outputs ?? defaultOutputs());
   }, [open, initial]);
 
-  const reset = () => { setName(''); setExportDir(''); setArch('amd64'); setOutputs(defaultOutputs()); };
+  const reset = () => { setName(''); setExportDir(''); setContextDir(''); setArch('amd64'); setOutputs(defaultOutputs()); };
   const checkedOutputs = OUTPUT_KEYS.filter(k => outputs[k]).map(String);
 
   return (
@@ -147,8 +143,8 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
       title={initial ? t('sidebar.editProject') : t('sidebar.newProject')}
       onOk={async () => {
         const p: Project = initial
-          ? { ...initial, name: name || initial.name, exportDir, defaultArch: arch, outputs }
-          : { id: `prj-${Date.now().toString(36)}`, name: name || t('sidebar.projectName'), createdAt: new Date().toISOString(), defaultArch: arch, outputs, exportDir, programs: [] };
+          ? { ...initial, name: name || initial.name, exportDir, contextDir, defaultArch: arch, outputs }
+          : { id: `prj-${Date.now().toString(36)}`, name: name || t('sidebar.projectName'), createdAt: new Date().toISOString(), defaultArch: arch, outputs, exportDir, contextDir, programs: [] };
         await onSave(p);
         reset();
         onClose();
@@ -189,6 +185,16 @@ function ProjectEditModal({ open, initial, onClose, onSave }: { open: boolean; i
         <Button icon={<FolderOpenOutlined />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setExportDir(d); }}>
           {t('form.pickDir')}
         </Button>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('sidebar.projectContext')}</Typography.Text>
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <Input placeholder={t('sidebar.projectContextPlaceholder')} value={contextDir} onChange={(e) => setContextDir(e.target.value)} style={{ flex: 1 }} />
+          <Button icon={<FolderOpenOutlined />} onClick={async () => { const d = await openDialog({ directory: true }); if (typeof d === 'string') setContextDir(d); }}>
+            {t('form.pickDir')}
+          </Button>
+        </div>
+        <Typography.Text type="secondary" style={{ fontSize: 11 }}>{t('sidebar.projectContextHint')}</Typography.Text>
       </div>
     </Modal>
   );

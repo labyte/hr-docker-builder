@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Checkbox, Col, Form, Input, Modal, Row, Space } from 'antd';
+import { App, Button, Col, Form, Input, Modal, Row, Space, Tag } from 'antd';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import { baseName, dirOf, joinPath } from '../utils';
@@ -25,14 +25,24 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
   const [argsText, setArgsText] = useState('');
   const selectedProjectId = useStore(s => s.selectedProjectId);
   const upsertProgram = useStore(s => s.upsertProgram);
+  const presets = useStore(s => s.config.global.buildArgPresets ?? []);
+
+  // 点选预设：同 key 互斥替换；再点移除
+  const togglePreset = (p: string) => {
+    const key = p.slice(0, p.indexOf('=') + 1);
+    const lines = argsText.split('\n').map(l => l.trim()).filter(Boolean);
+    const has = lines.includes(p);
+    const next = has ? lines.filter(l => l !== p) : [...lines.filter(l => !l.startsWith(key)), p];
+    setArgsText(next.join('\n'));
+  };
 
   useEffect(() => {
     if (!open) return;
     form.resetFields();
-    setArgsText(initial ? formatBuildArgs(initial.buildArgs) : 'CONFIGURATION=Release');
+    setArgsText(initial ? formatBuildArgs(initial.buildArgs) : '');
     form.setFieldsValue({
       name: initial?.name ?? '', projectFile: initial?.projectFile ?? '', dockerfile: initial?.dockerfile ?? '', context: initial?.context ?? '',
-      image: initial?.image ?? '', defaultVersion: initial?.defaultVersion ?? '0.1.0', enabled: initial?.enabled ?? true, nugetPackagesDir: initial?.nugetPackagesDir ?? '',
+      image: initial?.image ?? '', defaultVersion: initial?.defaultVersion ?? 'latest',
     });
   }, [open, initial, form]);
 
@@ -47,8 +57,8 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
     const v = await form.validateFields();
     const prog: Program = {
       id: initial?.id ?? `pg-${Date.now().toString(36)}`, name: v.name.trim(), projectFile: v.projectFile.trim(), dockerfile: v.dockerfile.trim(),
-      context: v.context.trim(), image: v.image.trim(), defaultVersion: v.defaultVersion.trim() || '0.1.0', buildArgs: parseBuildArgs(argsText),
-      enabled: !!v.enabled, nugetPackagesDir: (v.nugetPackagesDir ?? '').trim(), lastBuild: initial?.lastBuild ?? null,
+      context: (v.context ?? '').trim(), image: v.image.trim(), defaultVersion: v.defaultVersion.trim() || 'latest', buildArgs: parseBuildArgs(argsText),
+      enabled: initial?.enabled ?? true, nugetPackagesDir: initial?.nugetPackagesDir ?? '', lastBuild: initial?.lastBuild ?? null,
     };
     const ok = await upsertProgram(selectedProjectId!, prog);
     if (ok) { message.success(t('form.saved')); onClose(); } else { message.warning(t('errors.saveBlocked')); }
@@ -58,8 +68,9 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
     <Modal open={open} title={initial ? t('form.editTitle') : t('form.newTitle')} onOk={onOk} onCancel={onClose} okText={t('common.save')} cancelText={t('common.cancel')} width={640} destroyOnClose>
       <Form form={form} layout="vertical" size="middle">
         <Row gutter={12}>
-          <Col span={12}><Form.Item name="name" label={t('form.name')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr-order-api" /></Form.Item></Col>
-          <Col span={12}><Form.Item name="image" label={t('form.image')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr-order-api" /></Form.Item></Col>
+          <Col span={8}><Form.Item name="name" label={t('form.name')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr-order-api" /></Form.Item></Col>
+          <Col span={8}><Form.Item name="image" label={t('form.image')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr/app" /></Form.Item></Col>
+          <Col span={8}><Form.Item name="defaultVersion" label={t('form.version')}><Input placeholder="latest" /></Form.Item></Col>
         </Row>
         <Form.Item label={t('form.projectFile')}>
           <Space.Compact style={{ width:'100%' }}>
@@ -74,25 +85,24 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
             <Button onClick={async () => { const p = await pickFile(['*']); if (p) form.setFieldValue('dockerfile', p); }}>{t('form.pickFile')}</Button>
           </Space.Compact>
         </Form.Item>
-        <Form.Item name="context" label={t('form.context')} rules={[{ required:true, message:t('form.required') }]}>
+        <Form.Item name="context" label={t('form.context')} extra={t('form.contextFollowHint')}>
           <Space.Compact style={{ width:'100%' }}>
-            <Form.Item name="context" noStyle><Input placeholder="src/" /></Form.Item>
+            <Form.Item name="context" noStyle><Input placeholder={t('form.contextFollowPlaceholder')} /></Form.Item>
             <Button onClick={async () => { const p = await pickDir(); if (p) form.setFieldValue('context', p); }}>{t('form.pickDir')}</Button>
           </Space.Compact>
         </Form.Item>
-        <Row gutter={12}>
-          <Col span={12}><Form.Item name="defaultVersion" label={t('form.version')}><Input placeholder="1.0.0" /></Form.Item></Col>
-          <Col span={12}><Form.Item name="nugetPackagesDir" label={t('form.nugetDir')}>
-            <Space.Compact style={{ width:'100%' }}>
-              <Form.Item name="nugetPackagesDir" noStyle><Input placeholder="/data/nuget-packages" /></Form.Item>
-              <Button onClick={async () => { const p = await pickDir(); if (p) form.setFieldValue('nugetPackagesDir', p); }}>{t('form.pickDir')}</Button>
-            </Space.Compact>
-          </Form.Item></Col>
-        </Row>
         <Form.Item label={t('form.buildArgs')}>
+          {presets.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              {presets.map(p => (
+                <Tag.CheckableTag key={p} checked={argsText.split('\n').some(l => l.trim() === p)} onChange={() => togglePreset(p)} style={{ border: '1px solid #d9d9d9', marginRight: 6 }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{p}</span>
+                </Tag.CheckableTag>
+              ))}
+            </div>
+          )}
           <Input.TextArea rows={3} value={argsText} onChange={e => setArgsText(e.target.value)} placeholder="CONFIGURATION=Release" style={{ fontFamily:'monospace', fontSize:12 }} />
         </Form.Item>
-        <Form.Item name="enabled" valuePropName="checked" noStyle><Checkbox>{t('form.enabled')}</Checkbox></Form.Item>
       </Form>
     </Modal>
   );

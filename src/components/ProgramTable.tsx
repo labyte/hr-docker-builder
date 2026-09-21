@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Checkbox, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { DeleteOutlined, EditOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../store';
@@ -32,6 +32,7 @@ export default function ProgramTable({ onEdit }: Props) {
   const statuses = useStore(s => s.statuses);
   const running = useStore(s => s.running);
   const removeProgram = useStore(s => s.removeProgram);
+  const upsertProgram = useStore(s => s.upsertProgram);
 
   const issueSet = useMemo(() => {
     const set = new Set<string>();
@@ -39,22 +40,35 @@ export default function ProgramTable({ onEdit }: Props) {
     return set;
   }, [issues]);
 
+  // 百分比等比缩放（tableLayout=fixed）：窗口变小时各列同比收窄，不隐藏任何列；操作列保底 9%
   const columns: ColumnsType<Program> = useMemo(() => [
     {
-      title: t('table.name'), dataIndex: 'name', width: 220,
+      title: t('table.name'), dataIndex: 'name', width: '13%', ellipsis: { showTitle: false },
       render: (_, r) => (
-        <Space size={4}>
-          <span style={{ fontWeight: 500 }}>{r.name}</span>
-          {!r.enabled && <Tag>{t('table.disabled')}</Tag>}
-          {issueSet.has(r.id) && <Tooltip title={t('table.pathIssue')}><WarningOutlined style={{ color: '#faad14' }} /></Tooltip>}
-        </Space>
+        <Tooltip title={r.name} placement="topLeft">
+          <span>
+            <span style={{ fontWeight: 500 }}>{r.name}</span>
+            {issueSet.has(r.id) && <WarningOutlined style={{ color: '#faad14' }} />}
+          </span>
+        </Tooltip>
       ),
     },
-    { title: t('table.image'), dataIndex: 'image', width: 240, render: (_, r) => <span style={{ fontFamily:'monospace', fontSize:12 }}>{r.image}:{r.defaultVersion}</span> },
-    { title: t('table.dockerfile'), dataIndex: 'dockerfile', ellipsis:{ showTitle:false }, render: (v:string) => <Tooltip title={v}><span style={{ fontFamily:'monospace', fontSize:12 }}>{v}</span></Tooltip> },
-    { title: t('table.status'), width: 220, render: (_, r) => <StatusTags ev={statuses[r.id]} /> },
     {
-      title: t('table.lastBuild'), width: 180,
+      title: t('form.enabled'), dataIndex: 'enabled', width: '7%', align: 'center',
+      render: (_, r) => (
+        <Checkbox checked={r.enabled} disabled={running}
+          onChange={async e => {
+            const ok = await upsertProgram(selectedProjectId!, { ...r, enabled: e.target.checked });
+            if (!ok) { message.warning(t('errors.saveBlocked')); return; }
+            if (!e.target.checked) setSelected(useStore.getState().selectedIds.filter(id => id !== r.id));
+          }} />
+      ),
+    },
+    { title: t('table.image'), dataIndex: 'image', width: '15%', ellipsis: { showTitle: false }, render: (_, r) => <Tooltip title={`${r.image}:${r.defaultVersion}`} placement="topLeft"><span style={{ fontFamily:'monospace', fontSize:12 }}>{r.image}:{r.defaultVersion}</span></Tooltip> },
+    { title: t('table.dockerfile'), dataIndex: 'dockerfile', width: '21%', ellipsis:{ showTitle:false }, render: (v:string) => <Tooltip title={v}><span style={{ fontFamily:'monospace', fontSize:12 }}>{v}</span></Tooltip> },
+    { title: t('table.status'), width: '17%', render: (_, r) => <StatusTags ev={statuses[r.id]} /> },
+    {
+      title: t('table.lastBuild'), width: '11%',
       render: (_, r) => {
         const lb = r.lastBuild;
         if (!lb) return <Typography.Text type="secondary">—</Typography.Text>;
@@ -62,7 +76,7 @@ export default function ProgramTable({ onEdit }: Props) {
       },
     },
     {
-      title: t('table.actions'), width: 110,
+      title: t('table.actions'), width: '9%',
       render: (_, r) => (
         <Space size={4}>
           <Button size="small" type="text" icon={<EditOutlined />} disabled={running} onClick={() => onEdit(r)} />
@@ -81,9 +95,9 @@ export default function ProgramTable({ onEdit }: Props) {
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       <div style={{ flex:1, overflow:'auto', padding:'12px' }}>
         <Table<Program>
-          size="small" rowKey="id" columns={columns} dataSource={programs} pagination={false}
+          size="small" rowKey="id" columns={columns} dataSource={programs} pagination={false} tableLayout="fixed"
           locale={{ emptyText: <Empty description={t('table.empty')} style={{ padding:'36px 0' }} /> }}
-          rowSelection={{ selectedRowKeys: selectedIds, onChange: keys => setSelected(keys.map(String)) }}
+          rowSelection={{ selectedRowKeys: selectedIds, onChange: keys => setSelected(keys.map(String)), getCheckboxProps: r => ({ disabled: !r.enabled }) }}
         />
       </div>
     </div>

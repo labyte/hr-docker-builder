@@ -40,12 +40,15 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
     let mut tasks: Vec<BuildTask> = Vec::new();
     for pid in &req.program_ids {
         let Some(program) = project.programs.iter().find(|p| &p.id == pid) else { continue };
+        if !program.enabled { continue; } // 后端兜底：未参与构建的程序不入队
         for arch in &req.arches {
             tasks.push(BuildTask {
                 task_id: format!("{}-{}", program.id, arch),
                 program: program.clone(),
                 arch: arch.clone(),
                 host_arch: host_arch.clone(),
+                nuget_packages_dir: global.nuget_packages_dir.clone(),
+                project_context_dir: project.context_dir.clone(),
                 registry: global.registry.clone(),
                 builder_name: global.builder_name.clone(),
                 tag_template: global.tag_template.clone(),

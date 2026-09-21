@@ -33,11 +33,14 @@
     "newProject": "新建项目",
     "editProject": "编辑项目",
     "projectName": "项目名称",
-    "deleteConfirm": "删除该项目？所有程序清单将一并移除",
+    "deleteConfirm": "确定删除项目「{{name}}」？其下所有程序清单将一并移除",
     "copy": "复制",
     "copied": "已复制",
     "programs": "个程序",
-    "exportDir": "镜像导出目录（留空则使用默认）"
+    "exportDir": "镜像导出目录（留空则使用默认）",
+    "projectContext": "构建上下文目录（项目默认）",
+    "projectContextPlaceholder": "如 /code/hr/src",
+    "projectContextHint": "程序的上下文留空时，将使用此目录构建"
   },
   "export": {
     "scopeTitle": "导出离线包 · 范围",
@@ -98,6 +101,8 @@
     "pickDir": "选择目录",
     "required": "必填",
     "suggestFromProject": "根据项目文件带出路径",
+    "contextFollowHint": "留空跟随项目上下文目录；填写则覆盖",
+    "contextFollowPlaceholder": "留空则跟随项目设置",
     "saved": "已保存"
   },
   "settings": {
@@ -120,13 +125,18 @@
     "menuBuild": "构建",
     "menuRegistry": "Registry",
     "menuNaming": "命名",
-    "menuData": "数据",
+    "menuData": "数据目录",
+    "menuNuget": "NuGet 离线",
     "saveSection": "保存",
     "buildDesc": "批量构建队列行为",
     "concurrencyDesc": "同时构建的程序数（1–8）",
     "registryDesc": "勾选「推送 Registry」时使用；不推送可留空",
     "namingDesc": "镜像 Tag 与 builder 实例命名规则",
-    "builderNameDesc": "仅交叉架构构建使用；同架构自动走 default builder"
+    "builderNameDesc": "仅交叉架构构建使用；同架构自动走 default builder",
+    "buildPresets": "构建参数预设",
+    "buildPresetsHint": "每行一个 KEY=VALUE；保存后可在所有程序的「构建参数」中点选，同键互斥替换",
+    "nugetDir": "离线 NuGet 包目录",
+    "nugetDirHint": "对所有程序构建注入 NUGET_PACKAGES 构建参数；留空不注入"
   },
   "log": {
     "title": "构建日志",

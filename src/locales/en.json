@@ -33,11 +33,14 @@
     "newProject": "New project",
     "editProject": "Edit project",
     "projectName": "Project name",
-    "deleteConfirm": "Delete this project and all programs in it?",
+    "deleteConfirm": "Delete project \"{{name}}\"? All programs in it will be removed too",
     "copy": "Copy",
     "copied": "Copied",
     "programs": "programs",
-    "exportDir": "Image export dir (empty = default)"
+    "exportDir": "Image export dir (empty = default)",
+    "projectContext": "Build context dir (project default)",
+    "projectContextPlaceholder": "e.g. /code/hr/src",
+    "projectContextHint": "Programs with empty context build from this directory"
   },
   "export": {
     "scopeTitle": "Export offline pack · Scope",
@@ -98,7 +101,9 @@
     "pickDir": "Pick dir",
     "required": "Required",
     "suggestFromProject": "Suggest paths from project file",
-    "saved": "Saved"
+    "saved": "Saved",
+    "contextFollowHint": "Leave empty to follow the project context dir; set to override",
+    "contextFollowPlaceholder": "Empty = follow project setting"
   },
   "settings": {
     "title": "Global settings",
@@ -120,13 +125,18 @@
     "menuBuild": "Build",
     "menuRegistry": "Registry",
     "menuNaming": "Naming",
-    "menuData": "Data",
+    "menuData": "Data dir",
+    "menuNuget": "NuGet offline",
     "saveSection": "Save",
     "buildDesc": "Batch build queue behavior",
     "concurrencyDesc": "Programs built concurrently (1–8)",
     "registryDesc": "Used when pushing to a registry; leave empty if not pushing",
     "namingDesc": "Image tag and builder instance naming rules",
-    "builderNameDesc": "Used only for cross-arch builds; same-arch builds use the default builder"
+    "builderNameDesc": "Used only for cross-arch builds; same-arch builds use the default builder",
+    "buildPresets": "Build arg presets",
+    "buildPresetsHint": "One KEY=VALUE per line; selectable in every program's build args, same key replaces",
+    "nugetDir": "Offline NuGet packages dir",
+    "nugetDirHint": "Injected as NUGET_PACKAGES build arg for all programs; empty disables"
   },
   "log": {
     "title": "Build logs",

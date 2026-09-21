@@ -69,8 +69,12 @@ export default function Toolbar({ onAddProgram }: Props) {
         </Tooltip>
       )}
 
+      {/* 添加程序：靠左、圆形纯图标按钮 */}
+      <Tooltip title={t('table.add')}>
+        <Button type="primary" shape="circle" size="small" icon={<PlusOutlined />} disabled={running || !selectedId} onClick={onAddProgram} />
+      </Tooltip>
+
       <Space className="toolbar-actions">
-        <Button type="primary" ghost icon={<PlusOutlined />} disabled={running || !selectedId} onClick={onAddProgram}>{t('table.add')}</Button>
         {!running ? (
           <Button type="primary" icon={<ThunderboltOutlined />} disabled={!selectedId} onClick={async () => { const err = await startBuild(); if (err) message.error(errText(err)); }}>{t('toolbar.build')}</Button>
         ) : (
