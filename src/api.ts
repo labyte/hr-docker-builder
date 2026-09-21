@@ -11,5 +11,5 @@ export const api = {
   cancelBuild: () => invoke<void>('cancel_build'),
   revealPath: (path: string) => invoke<void>('reveal_path', { path }),
   exportOfflinePack: (destDir: string) => invoke<string>('export_offline_pack', { destDir }),
-  importOfflinePack: (tarPath: string) => invoke<string>('import_offline_pack', { tarPath }),
+  importOfflinePack: (packDir: string) => invoke<string>('import_offline_pack', { packDir }),
 };

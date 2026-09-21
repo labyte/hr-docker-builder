@@ -61,13 +61,16 @@ pub async fn probe(builder: &str) -> EnvInfo {
     env
 }
 
-pub async fn ensure_builder(builder: &str) -> Result<EnvInfo, String> {
+/// config：可选 buildkitd.toml 路径（离线 mirror 场景由导入流程提供）
+pub async fn ensure_builder(builder: &str, config: Option<&str>) -> Result<EnvInfo, String> {
     if !out(&["--version"]).await.is_ok() { return Err("docker_missing".into()); }
     if !out(&["buildx", "version"]).await.is_ok() { return Err("buildx_missing".into()); }
     if !out(&["info", "--format", "{{.ServerVersion}}"]).await.is_ok() { return Err("daemon_missing".into()); }
     let exists = out(&["buildx", "inspect", builder]).await.is_ok();
     if !exists {
-        out(&["buildx", "create", "--name", builder, "--driver", "docker-container"])
+        let mut create: Vec<&str> = vec!["buildx", "create", "--name", builder, "--driver", "docker-container"];
+        if let Some(c) = config { create.extend(["--config", c]); }
+        out(&create)
             .await
             .map_err(|e| format!("builder_create_failed: {e}"))?;
     }

@@ -45,10 +45,10 @@ export default function Toolbar({ onOpenSettings }: Props) {
     setOfflineBusy(false);
   };
   const handleImport = async () => {
-    const file = await openDialog({ multiple: false, filters: [{ name: 'tar', extensions: ['tar'] }] });
-    if (!file || typeof file !== 'string') return;
+    const dir = await openDialog({ directory: true });
+    if (!dir || typeof dir !== 'string') return;
     setOfflineBusy(true);
-    try { await api.importOfflinePack(file); } catch (e) { message.error(errText(e)); }
+    try { await api.importOfflinePack(dir); } catch (e) { message.error(errText(e)); }
     setOfflineBusy(false);
   };
 

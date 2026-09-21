@@ -38,9 +38,14 @@ pub async fn check_env(state: State<'_, AppState>) -> Result<EnvInfo, String> {
 }
 
 #[tauri::command]
-pub async fn ensure_builder(state: State<'_, AppState>) -> Result<EnvInfo, String> {
+pub async fn ensure_builder(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
     let builder = state.config.lock().unwrap().global.builder_name.clone();
-    env_checker::ensure_builder(&builder).await
+    // 离线机若已导入 registry mirror 且容器在跑，builder 需带 mirror 配置创建
+    let config = match offline_pack::offline_registry_running().await {
+        true => offline_pack::offline_mirror_config(&app),
+        false => None,
+    };
+    env_checker::ensure_builder(&builder, config.as_deref()).await
 }
 
 #[tauri::command]
@@ -120,8 +125,8 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
         use crate::types::{LogEvent, QueueDone};
         match offline_pack::export_pack(&app2, dockerfiles, &did, &rid2).await {
             Ok(m) => {
-                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("成功: {} 个镜像 → {}/offline-pack.tar", m.images.len(), did.trim_end_matches('/')), stream: "stdout".into() });
-                let _ = app2.emit("queue-done", QueueDone { success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack.tar", did.trim_end_matches('/'))], log_dir: dest_dir.clone() });
+                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("成功: {} 个镜像（含多架构 mirror 数据）→ {}/offline-pack", m.images.len(), did.trim_end_matches('/')), stream: "stdout".into() });
+                let _ = app2.emit("queue-done", QueueDone { success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack", did.trim_end_matches('/'))], log_dir: dest_dir.clone() });
             }
             Err(e) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导出失败: {e}"), stream: "stderr".into() });
@@ -133,12 +138,12 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
 }
 
 #[tauri::command]
-pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, tar_path: String) -> Result<String, String> {
+pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pack_dir: String) -> Result<String, String> {
     let builder = state.config.lock().unwrap().global.builder_name.clone();
     let rid = Local::now().format("import-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
-    let tp = tar_path.clone();
+    let tp = pack_dir.clone();
     let bn = builder.clone();
     tauri::async_runtime::spawn(async move {
         use crate::types::{LogEvent, QueueDone};
