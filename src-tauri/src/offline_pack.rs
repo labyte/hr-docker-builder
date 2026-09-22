@@ -99,6 +99,43 @@ async fn run_ok(args: &[&str]) -> Result<(), String> {
 
 async fn run_ignore(args: &[&str]) { let _ = docker_cmd().args(args).output().await; }
 
+/// 执行 docker 并把 stdout/stderr 逐行实时转发到前端日志（大镜像复制/拉取期间用户能看到 docker 自身进度），
+/// 失败时返回末尾若干行作错误详情；长时间无任何输出时发心跳提示（含已耗时秒数），
+/// 覆盖代理黑洞等"进程未退出也无输出"的悬挂场景，避免界面看起来卡死
+async fn run_stream(app: &AppHandle, run_id: &str, args: &[&str]) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let cmd = args.first().unwrap_or(&"");
+    let mut child = docker_cmd().args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("docker {cmd} 启动失败: {e}"))?;
+    let mut out = BufReader::new(child.stdout.take().ok_or("stdout 未捕获")?).lines();
+    let mut err = BufReader::new(child.stderr.take().ok_or("stderr 未捕获")?).lines();
+    let (mut out_open, mut err_open) = (true, true);
+    let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let start = std::time::Instant::now();
+    loop {
+        if !out_open && !err_open { break; }
+        tokio::select! {
+            l = out.next_line(), if out_open => match l {
+                Ok(Some(s)) => { emit_line(app, run_id, &s, "stdout"); tail.push_back(s); if tail.len() > 60 { tail.pop_front(); } }
+                _ => out_open = false,
+            },
+            l = err.next_line(), if err_open => match l {
+                Ok(Some(s)) => { emit_line(app, run_id, &s, "stderr"); tail.push_back(s); if tail.len() > 60 { tail.pop_front(); } }
+                _ => err_open = false,
+            },
+            _ = tokio::time::sleep(std::time::Duration::from_secs(20)) => {
+                emit_line(app, run_id, &format!("…… docker {cmd} 仍在进行：已耗时 {} 秒，近 20 秒无新输出（大镜像复制/网络较慢时属正常）", start.elapsed().as_secs()), "stderr");
+            }
+        }
+    }
+    let status = child.wait().await.map_err(|e| format!("等待 docker {cmd} 进程失败: {e}"))?;
+    if status.success() { return Ok(()); }
+    Err(format!("docker {cmd} 失败: {}", tail.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n").trim()))
+}
+
 /// 提取错误里最有信息量的一行（首个含 ERROR/error 的行，截 160 字符）
 fn brief_err(e: &str) -> String {
     e.lines()
@@ -112,7 +149,7 @@ fn brief_err(e: &str) -> String {
 async fn run_ok_retry(app: &AppHandle, run_id: &str, args: &[&str], attempts: u32) -> Result<(), String> {
     let mut last = String::new();
     for i in 0..attempts {
-        match run_ok(args).await {
+        match run_stream(app, run_id, args).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 last = e;
@@ -194,7 +231,7 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
     }
 
     // 4. 纯本地合成 manifest list（源与目标都在 localhost，不再触达上游 CDN）
-    let mut args: Vec<&str> = vec!["buildx", "imagetools", "create", "-t", target];
+    let mut args: Vec<&str> = vec!["buildx", "imagetools", "create", "--builder", "default", "-t", target];
     args.extend(refs.iter().map(|s| s.as_str()));
     run_ok(&args).await.map_err(|e| format!("本地合成 manifest 失败: {e}"))?;
 
@@ -318,9 +355,11 @@ pub async fn export_pack(
     // 4-6. 启动临时 registry → 多架构复制 → 导出卷数据；
     // 任何一步成败都最终清理临时容器（防止失败早退后容器与端口泄漏占用）
     let mirrored = async {
-        // 4. 启动临时本地 registry（每个上游一个，端口 5000+i）
+        // 4. 启动临时本地 registry（每个上游一个，端口为 2.5 预解析结果）；
+        // 名称与导入侧 hr-offline-reg-* 隔离：已导入的机器上再次导出时，
+        // 不能 rm -f 掉正在服役的离线 mirror（镜像数据在容器层内，删除即丢失）
         for r in regs.values() {
-            let name = format!("hr-offline-reg-{}", r.index);
+            let name = format!("hr-export-reg-{}", r.index);
             run_ignore(&["rm", "-f", &name]).await;
             let bind = format!("{}:{}:5000", publish_bind(), r.port);
             run_ok(&["run", "-d", "--name", &name, "-p", &bind, "registry:2"])
@@ -329,27 +368,29 @@ pub async fn export_pack(
 
         // 5. 多架构复制：imagetools 把 manifest list + 全部平台 blobs 原样推入本地 registry
         //（瞬时故障自动重试续传；buildkit 直连通路被 CDN 持续 CANCEL 时回退守护进程逐平台中转）
+        // 固定 --builder default（docker 驱动）：绕开 hr-builder 可能挂载的 mirror 配置，
+        // 且 hr-builder 容器内 localhost 目标不可达
         for (orig, host, path) in &mirrorable {
             let r = &regs[host];
             let target = format!("localhost:{}/{}", r.port, path);
             emit_line(app, run_id, &format!("复制多架构 {orig} → {target}"), "stdout");
-            if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "-t", &target, orig], 2).await {
+            if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "--builder", "default", "-t", &target, orig], 2).await {
                 emit_line(app, run_id, &format!("buildkit 直连复制失败（{}），回退守护进程逐平台中转", brief_err(&e)), "stderr");
                 mirror_via_daemon(app, run_id, orig, &target).await
                     .map_err(|e2| format!("复制多架构失败 {orig}: 直连[{}] 回退[{}]", brief_err(&e), brief_err(&e2)))?;
             }
         }
 
-        // 6. 导出 registry 卷数据
+        // 6. 导出 registry 卷数据（cp 大目录无进度输出，心跳提示兜底）
         for r in regs.values() {
-            let name = format!("hr-offline-reg-{}", r.index);
+            let name = format!("hr-export-reg-{}", r.index);
             let out = dir.join("registry-data").join(r.index.to_string());
             fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-            run_ok(&["cp", &format!("{name}:/var/lib/registry/."), out.to_str().ok_or("导出路径含非法字符")?]).await?;
+            run_stream(app, run_id, &["cp", &format!("{name}:/var/lib/registry/."), out.to_str().ok_or("导出路径含非法字符")?]).await?;
         }
         Ok::<(), String>(())
     }.await;
-    for r in regs.values() { run_ignore(&["rm", "-f", &format!("hr-offline-reg-{}", r.index)]).await; }
+    for r in regs.values() { run_ignore(&["rm", "-f", &format!("hr-export-reg-{}", r.index)]).await; }
     mirrored?;
 
     // 7. images.tar：工具镜像 + 基础镜像（本机架构，docker load 用）
@@ -357,7 +398,7 @@ pub async fn export_pack(
     let mut args: Vec<&str> = vec!["save", "-o", tar.to_str().ok_or("导出路径非法")?];
     args.extend(all.iter().copied());
     emit_line(app, run_id, "docker save → images.tar ...", "stdout");
-    run_ok(&args).await?;
+    run_stream(app, run_id, &args).await?;
 
     // 8. manifest.json
     let manifest = PackManifest {
@@ -391,7 +432,7 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &P
     let tar = dir.join("images.tar");
     if !tar.is_file() { return Err(format!("离线包缺少 images.tar: {}", tar.display())); }
     emit_line(app, run_id, "导入镜像库（docker load）...", "stdout");
-    run_ok(&["load", "-i", tar.to_str().ok_or("路径非法")?]).await?;
+    run_stream(app, run_id, &["load", "-i", tar.to_str().ok_or("路径非法")?]).await?;
 
     // 2. 启动各上游对应的本地 registry 并灌入数据（清单端口被占用时自动顺延，后续配置按实际端口生成）
     let mut regs = manifest.registries.clone();
@@ -408,7 +449,7 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &P
         run_ok(&["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"]).await?;
         let data = dir.join("registry-data").join(r.index.to_string());
         if data.is_dir() {
-            run_ok(&["cp", &format!("{}/.", data.to_str().ok_or("路径非法")?), &format!("{name}:/var/lib/registry/")]).await?;
+            run_stream(app, run_id, &["cp", &format!("{}/.", data.to_str().ok_or("路径非法")?), &format!("{name}:/var/lib/registry/")]).await?;
             run_ok(&["restart", &name]).await?;
         } else {
             emit_line(app, run_id, &format!("警告: 缺少数据目录 {}，该上游镜像无法镜像", data.display()), "stderr");
