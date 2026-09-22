@@ -80,6 +80,15 @@ fn publish_bind() -> &'static str {
     if cfg!(target_os = "linux") { "0.0.0.0" } else { "127.0.0.1" }
 }
 
+/// 探测空闲端口：从 preferred 起逐个试绑（与 docker 发布同地址；Windows Hyper-V 保留段同样绑定失败被跳过），
+/// 全部被占则返回原值，走 docker run 报错兜底
+fn free_port(preferred: u16) -> u16 {
+    let addr = publish_bind();
+    (preferred..preferred.saturating_add(64))
+        .find(|p| std::net::TcpListener::bind((addr, *p)).is_ok())
+        .unwrap_or(preferred)
+}
+
 async fn run_ok(args: &[&str]) -> Result<(), String> {
     let o = docker_cmd().args(args).output().await.map_err(|e| format!("docker {} 启动失败: {e}", args.first().unwrap_or(&"")))?;
     if o.status.success() { return Ok(()); }
@@ -90,12 +99,109 @@ async fn run_ok(args: &[&str]) -> Result<(), String> {
 
 async fn run_ignore(args: &[&str]) { let _ = docker_cmd().args(args).output().await; }
 
+/// 提取错误里最有信息量的一行（首个含 ERROR/error 的行，截 160 字符）
+fn brief_err(e: &str) -> String {
+    e.lines()
+        .find(|l| l.contains("ERROR") || l.contains("error"))
+        .unwrap_or_else(|| e.lines().next().unwrap_or(""))
+        .chars().take(160).collect()
+}
+
+/// 网络类 docker 操作的重试包装：CDN 流中断（stream CANCEL）/连接重置等瞬时故障短退避重试通常可恢复；
+/// 已推入本地 registry 的层按 digest 去重，重试等价于续传
+async fn run_ok_retry(app: &AppHandle, run_id: &str, args: &[&str], attempts: u32) -> Result<(), String> {
+    let mut last = String::new();
+    for i in 0..attempts {
+        match run_ok(args).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = e;
+                if i + 1 < attempts {
+                    let brief = brief_err(&last);
+                    emit_line(app, run_id, &format!("[重试 {}/{}] docker {} 瞬时失败：{brief}", i + 1, attempts - 1, args.first().unwrap_or(&"")), "stderr");
+                    tokio::time::sleep(std::time::Duration::from_secs(3 * (i as u64 + 1))).await;
+                }
+            }
+        }
+    }
+    Err(format!("重试 {attempts} 次仍失败: {last}"))
+}
+
 fn emit_line(app: &AppHandle, run_id: &str, line: &str, stream: &str) {
     let _ = app.emit("build-log", LogEvent { task_id: run_id.into(), project_id: run_id.into(), line: line.into(), stream: stream.into() });
 }
 
-async fn pull_image(image: &str) -> Result<(), String> {
-    run_ok(&["pull", image]).await.map_err(|e| format!("pull {image} 失败: {e}"))
+async fn pull_image(app: &AppHandle, run_id: &str, image: &str) -> Result<(), String> {
+    run_ok_retry(app, run_id, &["pull", image], 3).await.map_err(|e| format!("pull {image} 失败: {e}"))
+}
+
+/// 拆分 registry 引用为 (repo, tag)；仅在 tag 分隔符位于最后一个 '/' 之后时才拆分，无 tag 视为 latest
+fn split_repo_tag(target: &str) -> (&str, &str) {
+    match target.rfind(':') {
+        Some(i) if Some(i) > target.rfind('/') => (&target[..i], &target[i + 1..]),
+        _ => (target, "latest"),
+    }
+}
+
+/// mirror 通道兜底：经守护进程逐平台中转。
+/// buildkit 直连复制（imagetools create 从上游 CDN 拉 blob）在部分网络环境（代理 + Azure CDN 的
+/// HTTP/2 通路）会被持续 stream CANCEL，重试无效；而守护进程 pull/push 通路实测不受影响。
+/// 流程：CLI 本地 manifest inspect 枚举 linux 平台 → 逐平台 pull --platform → tag → push 进本地
+/// registry → 纯本地合成 manifest list，全程不再经 buildkit 直连上游
+async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &str) -> Result<(), String> {
+    // 1. 枚举上游平台（docker manifest inspect 在 CLI 本地解析，不经 buildkit）
+    let out = docker_cmd().args(["manifest", "inspect", orig]).output().await
+        .map_err(|e| format!("docker manifest inspect 启动失败: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("manifest inspect {orig} 失败: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("manifest JSON 解析失败: {e}"))?;
+    let mut platforms: Vec<String> = Vec::new();
+    if let Some(ms) = v.get("manifests").and_then(|m| m.as_array()) {
+        for m in ms {
+            let p = match m.get("platform") { Some(p) => p, None => continue };
+            // 只中转 linux 平台（Windows 平台条目守护进程拉不了，离线构建也用不到；unknown 为证明类附件）
+            if p.get("os").and_then(|x| x.as_str()) != Some("linux") { continue; }
+            let arch = match p.get("architecture").and_then(|x| x.as_str()) { Some(a) => a, None => continue };
+            platforms.push(match p.get("variant").and_then(|x| x.as_str()) {
+                Some(var) => format!("linux/{arch}/{var}"),
+                None => format!("linux/{arch}"),
+            });
+        }
+    }
+
+    // 2. 单平台镜像：主流程步骤 3 已拉取本机架构，直接 tag → push
+    if platforms.is_empty() {
+        emit_line(app, run_id, &format!("回退：{orig} 为单平台镜像，守护进程直接中转"), "stdout");
+        run_ok(&["tag", orig, target]).await?;
+        return run_ok_retry(app, run_id, &["push", target], 3).await
+            .map_err(|e| format!("push {target} 失败: {e}"));
+    }
+
+    // 3. 多平台：逐平台 pull → tag → push（守护进程里同名 tag 会被后一次 pull 覆盖，拉完须立即转存推送）
+    let (repo, tag) = split_repo_tag(target);
+    let mut refs: Vec<String> = Vec::with_capacity(platforms.len());
+    for pf in &platforms {
+        let t = format!("{repo}:{tag}-{}", pf.replace('/', "-"));
+        emit_line(app, run_id, &format!("回退中转 {orig} [{pf}] → {t}"), "stdout");
+        run_ok_retry(app, run_id, &["pull", "--platform", pf, orig], 3).await
+            .map_err(|e| format!("pull {orig} [{pf}] 失败: {e}"))?;
+        run_ok(&["tag", orig, &t]).await?;
+        run_ok_retry(app, run_id, &["push", &t], 3).await
+            .map_err(|e| format!("push {t} 失败: {e}"))?;
+        refs.push(t);
+    }
+
+    // 4. 纯本地合成 manifest list（源与目标都在 localhost，不再触达上游 CDN）
+    let mut args: Vec<&str> = vec!["buildx", "imagetools", "create", "-t", target];
+    args.extend(refs.iter().map(|s| s.as_str()));
+    run_ok(&args).await.map_err(|e| format!("本地合成 manifest 失败: {e}"))?;
+
+    // 5. 恢复本机架构 tag：逐平台拉取会把 orig 覆盖成最后一个平台，
+    //    重拉一次（层已缓存，秒级）保证后续 docker save 导出的是本机架构镜像
+    run_ok_retry(app, run_id, &["pull", orig], 2).await
+        .map_err(|e| format!("恢复本机架构 tag 失败: {e}"))
 }
 
 /// 供 commands 使用：若 mirror 配置存在（导入离线包生成于数据根目录），返回 buildkitd.toml 路径
@@ -191,13 +297,22 @@ pub async fn export_pack(
             regs.insert(host.clone(), RegistryEntry { host: host.clone(), port: 5000 + index as u16, index });
         }
     }
+    // 2.5 端口预解析：5000+i 被本机其他程序占用时自动顺延到空闲端口；
+    // manifest 记录实际端口，导入端按 manifest 启动容器与生成 mirror 配置
+    for r in regs.values_mut() {
+        let effective = free_port(r.port);
+        if effective != r.port {
+            emit_line(app, run_id, &format!("端口 {} 已被占用，{} 改用端口 {}", r.port, r.host, effective), "stdout");
+            r.port = effective;
+        }
+    }
 
     // 3. 拉取（本机架构）：工具镜像 + 全部基础镜像
     let mut all: Vec<&str> = TOOL_IMAGES.iter().map(|s| *s).collect();
     all.extend(bases.iter().map(|s| s.as_str()));
     for img in &all {
         emit_line(app, run_id, &format!("Pulling {img}..."), "stdout");
-        pull_image(img).await?;
+        pull_image(app, run_id, img).await?;
     }
 
     // 4-6. 启动临时 registry → 多架构复制 → 导出卷数据；
@@ -213,11 +328,16 @@ pub async fn export_pack(
         }
 
         // 5. 多架构复制：imagetools 把 manifest list + 全部平台 blobs 原样推入本地 registry
+        //（瞬时故障自动重试续传；buildkit 直连通路被 CDN 持续 CANCEL 时回退守护进程逐平台中转）
         for (orig, host, path) in &mirrorable {
             let r = &regs[host];
             let target = format!("localhost:{}/{}", r.port, path);
             emit_line(app, run_id, &format!("复制多架构 {orig} → {target}"), "stdout");
-            run_ok(&["buildx", "imagetools", "create", "-t", &target, orig]).await?;
+            if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "-t", &target, orig], 2).await {
+                emit_line(app, run_id, &format!("buildkit 直连复制失败（{}），回退守护进程逐平台中转", brief_err(&e)), "stderr");
+                mirror_via_daemon(app, run_id, orig, &target).await
+                    .map_err(|e2| format!("复制多架构失败 {orig}: 直连[{}] 回退[{}]", brief_err(&e), brief_err(&e2)))?;
+            }
         }
 
         // 6. 导出 registry 卷数据
@@ -273,10 +393,16 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &P
     emit_line(app, run_id, "导入镜像库（docker load）...", "stdout");
     run_ok(&["load", "-i", tar.to_str().ok_or("路径非法")?]).await?;
 
-    // 2. 启动各上游对应的本地 registry 并灌入数据
-    for r in &manifest.registries {
+    // 2. 启动各上游对应的本地 registry 并灌入数据（清单端口被占用时自动顺延，后续配置按实际端口生成）
+    let mut regs = manifest.registries.clone();
+    for r in &mut regs {
         let name = format!("hr-offline-reg-{}", r.index);
         run_ignore(&["rm", "-f", &name]).await;
+        let effective = free_port(r.port);
+        if effective != r.port {
+            emit_line(app, run_id, &format!("端口 {} 已被占用，{} 改用端口 {}", r.port, r.host, effective), "stdout");
+            r.port = effective;
+        }
         let bind = format!("{}:{}:5000", publish_bind(), r.port);
         emit_line(app, run_id, &format!("启动本地 registry（{} → :{}）", r.host, r.port), "stdout");
         run_ok(&["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"]).await?;
@@ -289,11 +415,11 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &P
         }
     }
 
-    // 3. 生成 buildkitd.toml（供 hr-builder --config）与镜像清单备份
+    // 3. 生成 buildkitd.toml（供 hr-builder --config，使用实际端口）与镜像清单备份
     let off_dir = root.join("offline");
     fs::create_dir_all(&off_dir).map_err(|e| e.to_string())?;
-    fs::write(off_dir.join("buildkitd.toml"), mirror_toml(&manifest.registries)).map_err(|e| e.to_string())?;
-    if let Ok(j) = serde_json::to_string_pretty(&manifest.registries) {
+    fs::write(off_dir.join("buildkitd.toml"), mirror_toml(&regs)).map_err(|e| e.to_string())?;
+    if let Ok(j) = serde_json::to_string_pretty(&regs) {
         let _ = fs::write(off_dir.join("registries.json"), j);
     }
 

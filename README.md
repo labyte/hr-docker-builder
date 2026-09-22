@@ -111,7 +111,8 @@
 2. 顶栏「环境信息」（或 设置 → Docker 环境）查看「**离线 mirror**」行是否就绪；未就绪时检查 `hr-offline-reg-*` 容器是否在运行（`docker ps -a`），必要时重新导入；
 3. Dockerfile 的 `FROM` 不要用 **digest 固定引用**（`xxx@sha256:...`）——digest 不走 mirror 通道、仅本机架构可用，请改用 tag 引用；
 4. 离线包是**导出时快照**：Dockerfile 基础镜像变更（换 tag、新增程序）后需在在线机重新导出；
-5. Linux 离线机：`docker buildx inspect hr-builder` 的 driver options 应含 `network=host`（新版导入流程自动带上；旧版重新导入一次即可触发重建）。
+5. Linux 离线机：`docker buildx inspect hr-builder` 的 driver options 应含 `network=host`（新版导入流程自动带上；旧版重新导入一次即可触发重建）；
+6. 导出/导入提示**端口被占用**：新版会自动顺延空闲端口（日志有"改用端口 X"记录）；仍失败时用 `netstat -ano | findstr :5000`（Windows）排查占用进程。
 
 .NET 还原离线方案：在「设置 → NuGet 离线」中配置**离线 NuGet 包目录**（全局生效，对所有程序构建注入 `NUGET_PACKAGES` 参数；或指向内网 NuGet 源），Dockerfile 模板已参数化支持。
 
