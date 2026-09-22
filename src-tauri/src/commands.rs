@@ -153,7 +153,7 @@ pub fn start_build(app: AppHandle, state: State<AppState>, req: StartBuildReques
         if inner.await.is_err() {
             use crate::types::{LogEvent, QueueDone};
             let _ = app3.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: "构建队列异常终止（内部错误），已自动解除占用".into(), stream: "stderr".into() });
-            let _ = app3.emit("queue-done", QueueDone { success: 0, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: String::new() });
+            let _ = app3.emit("queue-done", QueueDone { kind: "build".into(), success: 0, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: String::new() });
         }
     });
     Ok(run_id)
@@ -245,11 +245,11 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
         match offline_pack::export_pack(&app2, dockerfiles, &did, &rid2).await {
             Ok(m) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("成功[{scope_label}]: {} 个镜像（含多架构 mirror 数据）→ {}/offline-pack", m.images.len(), did.trim_end_matches('/')), stream: "stdout".into() });
-                let _ = app2.emit("queue-done", QueueDone { success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack", did.trim_end_matches('/'))], log_dir: dest_dir.clone() });
+                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack", did.trim_end_matches('/'))], log_dir: dest_dir.clone() });
             }
             Err(e) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导出失败: {e}"), stream: "stderr".into() });
-                let _ = app2.emit("queue-done", QueueDone { success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: dest_dir });
+                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: dest_dir });
             }
         }
     });
@@ -273,17 +273,17 @@ pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pac
         use crate::types::{LogEvent, QueueDone};
         if let Err(e) = offline_pack::import_pack(&app2, &tp, &rid2, &root).await {
             let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导入失败: {e}"), stream: "stderr".into() });
-            let _ = app2.emit("queue-done", QueueDone { success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
+            let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
             return;
         }
         match offline_pack::bootstrap_offline_env(&app2, &bn, &rid2, &root).await {
             Ok(msg) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: msg, stream: "stdout".into() });
-                let _ = app2.emit("queue-done", QueueDone { success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
+                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
             }
             Err(e) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("自举失败: {e}"), stream: "stderr".into() });
-                let _ = app2.emit("queue-done", QueueDone { success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
+                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
             }
         }
     });

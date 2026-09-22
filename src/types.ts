@@ -114,6 +114,8 @@ export interface StatusEvent {
 }
 
 export interface QueueDone {
+  /** 操作类型：build 构建队列 / export 离线包导出 / import 离线包导入，汇总胶囊文案据此切换 */
+  kind: 'build' | 'export' | 'import';
   success: number;
   failed: number;
   canceled: number;

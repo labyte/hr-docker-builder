@@ -61,6 +61,13 @@ export default function LogPanel() {
     ...visiblePrograms.map((p) => ({ key: p.id, label: p.name, children: <LogView lines={logs[p.id] ?? []} /> })),
   ];
 
+  // 汇总胶囊文案：构建展示各终态计数；导出/导入是单一操作，只区分成功/失败
+  const summaryText = summary && (
+    summary.kind === 'build'
+      ? t('log.summary', { success: summary.success, failed: summary.failed, canceled: summary.canceled, skipped: summary.skipped })
+      : t(`log.summary${summary.kind === 'export' ? 'Export' : 'Import'}${summary.failed > 0 ? 'Fail' : 'Ok'}`)
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '8px 12px 12px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -83,7 +90,7 @@ export default function LogPanel() {
             background: summary.failed > 0 ? '#fff2f0' : '#f6ffed',
             color: summary.failed > 0 ? '#ff4d4f' : '#389e0d',
           }}>
-            {t('log.summary', { success: summary.success, failed: summary.failed, canceled: summary.canceled, skipped: summary.skipped })}
+            {summaryText}
           </span>
         )}
       </div>

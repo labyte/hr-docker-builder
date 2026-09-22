@@ -126,6 +126,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
     while set.join_next().await.is_some() {}
 
     let done = QueueDone {
+        kind: "build".into(),
         success: counts.success.load(Ordering::Relaxed),
         failed: counts.failed.load(Ordering::Relaxed),
         canceled: counts.canceled.load(Ordering::Relaxed),

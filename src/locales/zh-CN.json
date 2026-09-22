@@ -176,6 +176,10 @@
     "progress": "进度",
     "openDir": "打开日志目录",
     "summary": "本次构建：成功 {{success}} / 失败 {{failed}} / 取消 {{canceled}} / 跳过 {{skipped}}",
+    "summaryExportOk": "离线包导出完成",
+    "summaryExportFail": "离线包导出失败",
+    "summaryImportOk": "离线包导入完成",
+    "summaryImportFail": "离线包导入失败",
     "exported": "导出镜像文件",
     "reveal": "打开所在目录"
   },

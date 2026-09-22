@@ -176,6 +176,10 @@
     "progress": "Progress",
     "openDir": "Open log dir",
     "summary": "This run: {{success}} ok / {{failed}} failed / {{canceled}} canceled / {{skipped}} skipped",
+    "summaryExportOk": "Offline pack exported",
+    "summaryExportFail": "Offline pack export failed",
+    "summaryImportOk": "Offline pack imported",
+    "summaryImportFail": "Offline pack import failed",
     "exported": "Exported image files",
     "reveal": "Reveal"
   },

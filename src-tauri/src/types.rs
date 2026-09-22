@@ -200,6 +200,8 @@ pub struct StatusEvent {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueDone {
+    /// 操作类型：build（构建队列）/ export（离线包导出）/ import（离线包导入），前端汇总文案据此切换
+    pub kind: String,
     pub success: usize,
     pub failed: usize,
     pub canceled: usize,
