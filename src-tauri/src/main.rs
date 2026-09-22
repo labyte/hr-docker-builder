@@ -60,7 +60,8 @@ fn main() {
             commands::reveal_path,
             commands::get_export_dir,
             commands::export_offline_pack,
-            commands::import_offline_pack
+            commands::import_offline_pack,
+            commands::repair_offline_mirror
         ])
         .run(tauri::generate_context!())
         .expect("error while running HR Docker Builder");

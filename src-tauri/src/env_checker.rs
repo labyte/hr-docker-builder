@@ -69,7 +69,11 @@ pub async fn ensure_builder(builder: &str, config: Option<&str>) -> Result<EnvIn
     let exists = out(&["buildx", "inspect", builder]).await.is_ok();
     if !exists {
         let mut create: Vec<&str> = vec!["buildx", "create", "--name", builder, "--driver", "docker-container"];
-        if let Some(c) = config { create.extend(["--config", c]); }
+        if let Some(c) = config {
+            create.extend(["--config", c]);
+            // 与 bootstrap_offline_env 一致：Linux 离线 mirror 需宿主网络栈走 127.0.0.1
+            if cfg!(target_os = "linux") { create.extend(["--driver-opt", "network=host"]); }
+        }
         out(&create)
             .await
             .map_err(|e| format!("builder_create_failed: {e}"))?;

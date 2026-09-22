@@ -104,19 +104,53 @@ pub fn offline_mirror_config(root: &Path) -> Option<String> {
     toml.is_file().then(|| toml.to_string_lossy().to_string())
 }
 
-pub async fn offline_registry_running() -> bool {
+/// 运行中的 hr-offline-reg-* 本地 registry 容器名单
+pub async fn running_registries() -> Vec<String> {
     match docker_cmd().args(["ps", "--filter", "name=hr-offline-reg", "--format", "{{.Names}}"]).output().await {
-        Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
-        Err(_) => false,
+        Ok(o) => String::from_utf8_lossy(&o.stdout).lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        Err(_) => vec![],
     }
+}
+
+pub async fn offline_registry_running() -> bool {
+    !running_registries().await.is_empty()
+}
+
+/// builder 的 buildkit 容器是否挂载了 mirror 配置（创建时带 --config buildkitd.toml 的代理判据）
+pub async fn builder_has_mirror_config(builder: &str) -> bool {
+    let name = format!("buildx_buildkit_{}0", builder);
+    match docker_cmd().args(["inspect", &name]).output().await {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).contains("buildkitd.toml"),
+        _ => false,
+    }
+}
+
+/// 导入记录：root/offline/registries.json（导入离线包时写入；缺失=从未导入）
+pub fn load_registries(root: &Path) -> Option<Vec<RegistryEntry>> {
+    let raw = fs::read_to_string(root.join("offline").join("registries.json")).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// 拉起已存在的 registry 容器（镜像数据在容器内；容器被删则需重新导入离线包）
+pub async fn start_registry(name: &str) -> Result<(), String> {
+    run_ok(&["start", name]).await
+}
+
+/// buildkit mirror 寻址：
+/// - Windows/macOS Docker Desktop：容器内经 host.docker.internal 访问宿主发布端口
+/// - Linux：buildkit 容器默认解析不了 host.docker.internal，创建 builder 时加
+///   --driver-opt network=host 共享宿主网络栈，mirror 直接走 127.0.0.1 发布端口
+fn mirror_addr(port: u16) -> String {
+    if cfg!(target_os = "linux") { format!("127.0.0.1:{}", port) } else { format!("host.docker.internal:{}", port) }
 }
 
 fn mirror_toml(regs: &[RegistryEntry]) -> String {
     let mut s = String::from("# HR Docker Builder 离线镜像 mirror 配置（导入离线包自动生成）\n");
     for r in regs {
+        let addr = mirror_addr(r.port);
         s.push_str(&format!(
-            "\n[registry.\"{}\"]\n  mirrors = [\"host.docker.internal:{}\"]\n\n[registry.\"host.docker.internal:{}\"]\n  http = true\n  insecure = true\n",
-            r.host, r.port, r.port
+            "\n[registry.\"{}\"]\n  mirrors = [\"{addr}\"]\n\n[registry.\"{addr}\"]\n  http = true\n  insecure = true\n",
+            r.host
         ));
     }
     s
@@ -284,6 +318,8 @@ pub async fn bootstrap_offline_env(
     let mut create: Vec<&str> = vec!["buildx", "create", "--name", builder_name, "--driver", "docker-container"];
     if let Some(p) = &config {
         create.extend(["--config", p.as_str()]);
+        // Linux：buildkit 容器需共享宿主网络栈才能经 127.0.0.1 访问 mirror（见 mirror_addr）
+        if cfg!(target_os = "linux") { create.extend(["--driver-opt", "network=host"]); }
         emit_line(app, run_id, &format!("使用离线 mirror 配置: {p}"), "stdout");
     }
     run_ok(&create).await.map_err(|e| format!("builder create 失败: {e}"))?;

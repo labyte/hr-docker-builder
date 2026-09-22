@@ -13,4 +13,5 @@ export const api = {
   getExportDir: (exportDir: string) => invoke<string>('get_export_dir', { exportDir }),
   exportOfflinePack: (destDir: string, projectId?: string | null) => invoke<string>('export_offline_pack', { destDir, projectId: projectId ?? null }),
   importOfflinePack: (packDir: string) => invoke<string>('import_offline_pack', { packDir }),
+  repairOfflineMirror: () => invoke<string>('repair_offline_mirror'),
 };

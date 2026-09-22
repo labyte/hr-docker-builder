@@ -43,6 +43,7 @@ export interface BuilderState {
   refreshEnv: () => Promise<void>;
   fixBuilder: () => Promise<void>;
   installQemu: () => Promise<void>;
+  repairMirror: () => Promise<string | null>;
   persist: (cfg: AppConfig) => Promise<boolean>;
   selectProject: (id: string | null) => void;
   setProgramsEnabled: (projectId: string, enabledIds: string[]) => Promise<boolean>;
@@ -117,6 +118,13 @@ export const useStore = create<BuilderState>((set, get) => ({
   refreshEnv: async () => { set({ envBusy: true }); try { set({ env: await api.checkEnv() }); } finally { set({ envBusy: false }); } },
   fixBuilder: async () => { set({ envBusy: true }); try { set({ env: await api.ensureBuilder() }); } finally { set({ envBusy: false }); } },
   installQemu: async () => { set({ envBusy: true }); try { await api.installQemu(); set({ env: await api.checkEnv() }); } finally { set({ envBusy: false }); } },
+  // 一键修复离线 mirror：拉起 registry 容器 + 按 mirror 配置重建 builder；返回 null 成功 / 错误串
+  repairMirror: async () => {
+    set({ envBusy: true });
+    try { await api.repairOfflineMirror(); set({ env: await api.checkEnv() }); return null; }
+    catch (e) { return String(e); }
+    finally { set({ envBusy: false }); }
+  },
 
   persist: async (cfg) => {
     // 保存失败（queue_running / offline_busy）不应用到 state：UI 自动回退，调用方提示 saveBlocked

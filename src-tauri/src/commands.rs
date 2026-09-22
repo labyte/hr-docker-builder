@@ -8,7 +8,7 @@ use crate::env_checker;
 use crate::offline_pack;
 use crate::project_store;
 use crate::project_store::effective_root;
-use crate::types::{AppConfig, EnvInfo, PathIssue, StartBuildRequest};
+use crate::types::{AppConfig, EnvInfo, MirrorStatus, PathIssue, StartBuildRequest};
 use chrono::Local;
 
 #[derive(Default)]
@@ -66,10 +66,45 @@ pub fn save_config(app: AppHandle, state: State<AppState>, config: AppConfig) ->
     Ok(project_store::validate(&config))
 }
 
+/// 离线 mirror 细分状态：配置文件 / registry 容器（运行中/总数）/ builder 是否挂载 mirror 配置
+async fn probe_mirror(root: &std::path::Path, builder: &str) -> MirrorStatus {
+    let config_exists = offline_pack::offline_mirror_config(root).is_some();
+    let regs = offline_pack::load_registries(root);
+    let containers_total = regs.as_ref().map(|v| v.len()).unwrap_or(0);
+    let imported = config_exists || regs.is_some();
+    let containers_running = offline_pack::running_registries().await.len();
+    let builder_configured = imported && offline_pack::builder_has_mirror_config(builder).await;
+    MirrorStatus { imported, config_exists, containers_running, containers_total, builder_configured }
+}
+
 #[tauri::command]
-pub async fn check_env(state: State<'_, AppState>) -> Result<EnvInfo, String> {
-    let builder = state.config.lock().unwrap().global.builder_name.clone();
-    Ok(env_checker::probe(&builder).await)
+pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
+    let (builder, root) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+    };
+    let mut env = env_checker::probe(&builder).await;
+    env.mirror = probe_mirror(&root, &builder).await;
+    Ok(env)
+}
+
+/// 一键修复离线 mirror：拉起本地 registry 容器 → 以 mirror 配置重建 builder（复用导入自举流程）。
+/// 前提是本机导入过离线包（registries.json 存在）；容器被删（数据随容器保存）则需重新导入。
+#[tauri::command]
+pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let (builder, root) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+    };
+    let regs = offline_pack::load_registries(&root).ok_or_else(|| "mirror_not_imported".to_string())?;
+    acquire_offline(&state)?;
+    let _guard = OfflineGuard(app.clone());
+    let rid = Local::now().format("repair-%Y%m%d-%H%M%S").to_string();
+    for r in &regs {
+        offline_pack::start_registry(&format!("hr-offline-reg-{}", r.index))
+            .await.map_err(|_| "mirror_container_missing".to_string())?;
+    }
+    offline_pack::bootstrap_offline_env(&app, &builder, &rid, &root).await
 }
 
 #[tauri::command]
@@ -83,7 +118,9 @@ pub async fn ensure_builder(app: AppHandle, state: State<'_, AppState>) -> Resul
         true => offline_pack::offline_mirror_config(&root),
         false => None,
     };
-    env_checker::ensure_builder(&builder, config.as_deref()).await
+    let mut env = env_checker::ensure_builder(&builder, config.as_deref()).await?;
+    env.mirror = probe_mirror(&root, &builder).await;
+    Ok(env)
 }
 
 #[tauri::command]

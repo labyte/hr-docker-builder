@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { Space, Spin, Tag, Typography } from 'antd';
+import { App, Button, Space, Spin, Tag, Typography } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { useStore } from '../store';
+import { errText } from '../utils';
 import type { EnvInfo } from '../types';
 
 export interface EnvCaps {
@@ -42,7 +43,10 @@ const SectionLabel = ({ text }: { text: string }) => (
 /** 环境信息面板：已安装工具 / 提供的能力 / 支持平台——顶栏弹层与全局设置「Docker 环境」分区共用 */
 export default function EnvInfoPanel({ env, width }: { env: EnvInfo | null; width?: number }) {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const builderName = useStore(s => s.config.global.builderName);
+  const envBusy = useStore(s => s.envBusy);
+  const repairMirror = useStore(s => s.repairMirror);
   if (!env) {
     return (
       <div style={{ width, fontSize: 12 }}>
@@ -51,6 +55,9 @@ export default function EnvInfoPanel({ env, width }: { env: EnvInfo | null; widt
     );
   }
   const caps = deriveCaps(env);
+  const mirror = env.mirror;
+  const mirrorReady = mirror.configExists && mirror.containersRunning > 0
+    && mirror.containersRunning >= mirror.containersTotal && mirror.builderConfigured;
   return (
     <div style={{ width, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div>
@@ -61,6 +68,31 @@ export default function EnvInfoPanel({ env, width }: { env: EnvInfo | null; widt
           <Row ok={caps.qemu} name="QEMU / binfmt" detail={caps.qemu ? t('env.qemuInstalled') : t('env.qemuMissing')} />
           <Row ok={env.builderOk} name={t('env.toolBuilder', { name: builderName })} detail={env.builderOk ? t('env.builderReady') : t('env.builderNotReady')} />
         </div>
+      </div>
+      {/* 离线 mirror 细分：配置文件 / registry 容器 / builder 挂载——未就绪且导入过时提供一键修复 */}
+      <div>
+        <SectionLabel text={t('env.mirror')} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+          {!mirror.imported ? (
+            <Row ok={false} name={t('env.mirrorNotImported')} />
+          ) : (
+            <>
+              <Row ok={mirror.configExists} name={t('env.mirrorConfig')} />
+              <Row ok={mirror.containersRunning > 0 && mirror.containersRunning >= mirror.containersTotal}
+                name={t('env.mirrorContainers')} detail={`${mirror.containersRunning}/${mirror.containersTotal} ${t('env.mirrorRunning')}`} />
+              <Row ok={mirror.builderConfigured} name={t('env.mirrorBuilder')} />
+            </>
+          )}
+        </div>
+        {mirror.imported && !mirrorReady && (
+          <Button size="small" type="link" style={{ paddingLeft: 0, marginTop: 2 }} loading={envBusy}
+            onClick={async () => {
+              const err = await repairMirror();
+              if (err) message.error(errText(err)); else message.success(t('env.mirrorRepairOk'));
+            }}>
+            {t('env.mirrorRepair')}
+          </Button>
+        )}
       </div>
       <div>
         <SectionLabel text={t('env.capabilities')} />

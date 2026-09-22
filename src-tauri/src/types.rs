@@ -221,6 +221,24 @@ pub struct EnvInfo {
     pub buildx_version: String,
     /// 宿主架构 amd64/arm64：同架构构建走 default builder（本机镜像优先）
     pub host_arch: String,
+    /// 离线 mirror 细分状态（环境信息面板逐项展示 + 一键修复入口）
+    pub mirror: MirrorStatus,
+}
+
+// ── 离线 mirror 细分状态 ──
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorStatus {
+    /// 存在导入记录（registries.json / buildkitd.toml 任一）；false = 从未导入离线包
+    pub imported: bool,
+    /// buildkitd.toml 存在
+    pub config_exists: bool,
+    /// 运行中的 hr-offline-reg-* 容器数
+    pub containers_running: usize,
+    /// 导入记录中的容器总数
+    pub containers_total: usize,
+    /// builder 的 buildkit 容器已挂载 mirror 配置
+    pub builder_configured: bool,
 }
 
 // ── 配置损坏通知（load 时记录，get_config 冲刷为 config-corrupt 事件给前端弹窗）──

@@ -70,6 +70,21 @@ export interface EnvInfo {
   buildxVersion: string;
   /** 宿主架构（amd64/arm64，后端已归一化）：同架构走 default builder 本机镜像优先 */
   hostArch: string;
+  /** 离线 mirror 细分状态（环境信息面板逐项展示 + 一键修复入口） */
+  mirror: MirrorStatus;
+}
+
+export interface MirrorStatus {
+  /** 存在导入记录；false = 从未导入离线包（在线环境可忽略） */
+  imported: boolean;
+  /** buildkitd.toml 存在 */
+  configExists: boolean;
+  /** 运行中的本地 registry 容器数 */
+  containersRunning: number;
+  /** 导入记录中的容器总数 */
+  containersTotal: number;
+  /** builder 已挂载 mirror 配置 */
+  builderConfigured: boolean;
 }
 
 export interface StartBuildRequest {

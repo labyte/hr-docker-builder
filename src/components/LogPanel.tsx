@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Empty, Space, Switch, Tabs, Tooltip, Typography } from 'antd';
+import { Button, Empty, Switch, Tabs, Tooltip, Typography } from 'antd';
 import { FolderOpenFilled } from '@ant-design/icons';
 import { api } from '../api';
 import { useStore } from '../store';
@@ -63,7 +63,7 @@ export default function LogPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '8px 12px 12px 12px' }}>
-      <Space style={{ marginBottom: 10 }} wrap>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <Typography.Text strong>{t('log.title')}</Typography.Text>
         <Button size="small" onClick={clearLogs}>
           {t('log.clear')}
@@ -75,13 +75,18 @@ export default function LogPanel() {
             </Button>
           </Tooltip>
         )}
-        {/* 结果汇总行内展示（导出文件入口在工具条的目录链接，不再重复列出） */}
+        {/* 结果汇总：带边框胶囊，整行靠右（配色沿用状态栏成功/失败色系） */}
         {summary && (
-          <Typography.Text type={summary.failed > 0 ? 'danger' : 'success'} style={{ fontSize: 12 }}>
+          <span style={{
+            marginLeft: 'auto', fontSize: 12, padding: '2px 10px', borderRadius: 8, whiteSpace: 'nowrap',
+            border: `1px solid ${summary.failed > 0 ? '#ffa39e' : '#b7eb8f'}`,
+            background: summary.failed > 0 ? '#fff2f0' : '#f6ffed',
+            color: summary.failed > 0 ? '#ff4d4f' : '#389e0d',
+          }}>
             {t('log.summary', { success: summary.success, failed: summary.failed, canceled: summary.canceled, skipped: summary.skipped })}
-          </Typography.Text>
+          </span>
         )}
-      </Space>
+      </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         {allLogs.length === 0 && !summary ? (
           <div className="log" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

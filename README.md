@@ -105,6 +105,14 @@
 > ⚠️ v1 旧格式（单个 offline-pack.tar）不再支持，请在在线机重新导出一次。
 > 卸载/重置：`docker rm -f hr-offline-reg-0` 等容器（名称见导入日志），删除应用数据目录下 `offline/`。
 
+**离线跨架构构建失败排查**（如提示需在线访问基础镜像）：
+
+1. 离线机是否执行过「**导入离线包**」？只拷贝 `images.tar` 手动 load 不够——交叉架构依赖导入流程启动的本地 registry mirror 与带 mirror 配置重建的 builder；
+2. 顶栏「环境信息」（或 设置 → Docker 环境）查看「**离线 mirror**」行是否就绪；未就绪时检查 `hr-offline-reg-*` 容器是否在运行（`docker ps -a`），必要时重新导入；
+3. Dockerfile 的 `FROM` 不要用 **digest 固定引用**（`xxx@sha256:...`）——digest 不走 mirror 通道、仅本机架构可用，请改用 tag 引用；
+4. 离线包是**导出时快照**：Dockerfile 基础镜像变更（换 tag、新增程序）后需在在线机重新导出；
+5. Linux 离线机：`docker buildx inspect hr-builder` 的 driver options 应含 `network=host`（新版导入流程自动带上；旧版重新导入一次即可触发重建）。
+
 .NET 还原离线方案：在「设置 → NuGet 离线」中配置**离线 NuGet 包目录**（全局生效，对所有程序构建注入 `NUGET_PACKAGES` 参数；或指向内网 NuGet 源），Dockerfile 模板已参数化支持。
 
 常用构建参数（如 `CONFIGURATION=Release`）可在「设置 → 构建」中登记为**预设**，之后在程序表单里直接点选，无需手敲。
