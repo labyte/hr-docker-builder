@@ -45,9 +45,9 @@ export default function SettingsModal({ open, onClose }: Props) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let v: any;
     try { v = await form.validateFields(); } catch { return; }
-    const ok = await saveGlobal(patch(v));
-    if (ok) message.success(t('settings.blockSaved'));
-    else message.warning(t('errors.saveBlocked'));
+    const err = await saveGlobal(patch(v));
+    if (!err) message.success(t('settings.blockSaved'));
+    else message.warning(errText(err));
   };
 
   const SaveBtn = ({ onClick, primary = false }: { onClick: () => void; primary?: boolean }) => (

@@ -29,6 +29,8 @@ export interface BuilderState {
   outputs: Outputs;
 
   running: boolean;
+  /** 正在进行的离线任务（导出/导入/修复）：按钮忙碌态与互斥提示用；空闲为 null */
+  offlineOp: 'export' | 'import' | 'repair' | null;
   /** 本次构建总任务数（程序数 × 架构数），进度条分母 */
   totalTasks: number;
   statuses: Record<string, Record<string, StatusEvent>>;
@@ -44,19 +46,21 @@ export interface BuilderState {
   fixBuilder: () => Promise<void>;
   installQemu: () => Promise<void>;
   repairMirror: () => Promise<string | null>;
-  persist: (cfg: AppConfig) => Promise<boolean>;
+  setOfflineOp: (op: 'export' | 'import' | 'repair' | null) => void;
+  /** 保存配置：成功返回 null，失败返回后端错误 key（queue_running / busy_* 等），调用方经 errText 提示 */
+  persist: (cfg: AppConfig) => Promise<string | null>;
   selectProject: (id: string | null) => void;
-  setProgramsEnabled: (projectId: string, enabledIds: string[]) => Promise<boolean>;
+  setProgramsEnabled: (projectId: string, enabledIds: string[]) => Promise<string | null>;
   setArch: (a: string) => void;
   setOutputs: (o: Outputs) => void;
   setConcurrency: (n: number) => void;
   setFailFast: (b: boolean) => void;
-  upsertProject: (p: Project) => Promise<boolean>;
-  removeProject: (id: string) => Promise<boolean>;
+  upsertProject: (p: Project) => Promise<string | null>;
+  removeProject: (id: string) => Promise<string | null>;
   copyProject: (id: string) => Promise<Project | null>;
-  upsertProgram: (projectId: string, p: Program) => Promise<boolean>;
-  removeProgram: (projectId: string, id: string) => Promise<boolean>;
-  saveGlobal: (patch: Partial<AppConfig['global']>) => Promise<boolean>;
+  upsertProgram: (projectId: string, p: Program) => Promise<string | null>;
+  removeProgram: (projectId: string, id: string) => Promise<string | null>;
+  saveGlobal: (patch: Partial<AppConfig['global']>) => Promise<string | null>;
   startBuild: () => Promise<string | null>;
   cancelBuild: () => Promise<void>;
   clearLogs: () => void;
@@ -72,6 +76,7 @@ export const useStore = create<BuilderState>((set, get) => ({
   arch: 'amd64',
   outputs: defaultOutputs(),
   running: false,
+  offlineOp: null,
   totalTasks: 0,
   statuses: {},
   logs: {},
@@ -94,7 +99,8 @@ export const useStore = create<BuilderState>((set, get) => ({
         set((s) => ({ statuses: { ...s.statuses, [payload.programId]: { ...(s.statuses[payload.programId] ?? {}), [payload.arch]: payload } } }));
       });
       await listen<QueueDone>('queue-done', async ({ payload }) => {
-        set({ running: false, summary: payload });
+        // 导出/导入完成时同步清掉离线任务忙碌标记（修复不走 queue-done，由 repairMirror 自行清理）
+        set({ running: false, summary: payload, ...(payload.kind === 'build' ? {} : { offlineOp: null }) });
         // 构建期间后端已把 lastBuild 写盘：重拉配置保持同步，
         // 防止前端旧副本在下次保存时把它回滚覆盖
         try { set({ config: await api.getConfig() }); } catch (e) { console.error(e); }
@@ -118,18 +124,19 @@ export const useStore = create<BuilderState>((set, get) => ({
   refreshEnv: async () => { set({ envBusy: true }); try { set({ env: await api.checkEnv() }); } finally { set({ envBusy: false }); } },
   fixBuilder: async () => { set({ envBusy: true }); try { set({ env: await api.ensureBuilder() }); } finally { set({ envBusy: false }); } },
   installQemu: async () => { set({ envBusy: true }); try { await api.installQemu(); set({ env: await api.checkEnv() }); } finally { set({ envBusy: false }); } },
-  // 一键修复离线 mirror：拉起 registry 容器 + 按 mirror 配置重建 builder；返回 null 成功 / 错误串
+  // 一键修复离线 mirror：拉起/在线重建 registry 容器 + 按 mirror 配置重建 builder；返回 null 成功 / 错误串
   repairMirror: async () => {
-    set({ envBusy: true });
+    set({ envBusy: true, offlineOp: 'repair' });
     try { await api.repairOfflineMirror(); set({ env: await api.checkEnv() }); return null; }
     catch (e) { return String(e); }
-    finally { set({ envBusy: false }); }
+    finally { set({ envBusy: false, offlineOp: null }); }
   },
+  setOfflineOp: (op) => set({ offlineOp: op }),
 
   persist: async (cfg) => {
-    // 保存失败（queue_running / offline_busy）不应用到 state：UI 自动回退，调用方提示 saveBlocked
-    try { set({ config: cfg, issues: await api.saveConfig(cfg) }); return true; }
-    catch { return false; }
+    // 保存失败（queue_running / busy_*）不应用到 state：UI 自动回退，返回错误 key 供调用方经 errText 具体提示
+    try { set({ config: cfg, issues: await api.saveConfig(cfg) }); return null; }
+    catch (e) { return String(e); }
   },
 
   selectProject: (id) => {
@@ -138,9 +145,9 @@ export const useStore = create<BuilderState>((set, get) => ({
   },
   // 表格复选框勾选 = 参与构建：批量写回 enabled 并持久化（一次保存）
   setProgramsEnabled: async (projectId, enabledIds) => {
-    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return false;
+    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return `project_not_found:${projectId}`;
     const on = new Set(enabledIds);
-    if (!prj.programs.some(p => p.enabled !== on.has(p.id))) return true;
+    if (!prj.programs.some(p => p.enabled !== on.has(p.id))) return null;
     return s.upsertProject({ ...prj, programs: prj.programs.map(p => ({ ...p, enabled: on.has(p.id) })) });
   },
   setArch: (a) => { set({ arch: a }); updateProject(get, a); },
@@ -151,30 +158,32 @@ export const useStore = create<BuilderState>((set, get) => ({
   upsertProject: async (p) => {
     const s = get(); const exists = s.config.projects.some(x => x.id === p.id);
     const projects = exists ? s.config.projects.map(x => x.id === p.id ? p : x) : [...s.config.projects, p];
-    const ok = await s.persist({ ...s.config, projects });
+    const err = await s.persist({ ...s.config, projects });
     // 项目设置里改了架构/去向：即时同步工具条展示
-    if (ok && s.selectedProjectId === p.id) set({ arch: p.defaultArch, outputs: p.outputs });
-    return ok;
+    if (!err && s.selectedProjectId === p.id) set({ arch: p.defaultArch, outputs: p.outputs });
+    return err;
   },
   removeProject: async (id) => {
     const s = get();
-    const ok = await s.persist({ ...s.config, projects: s.config.projects.filter(x => x.id !== id) });
-    if (ok && s.selectedProjectId === id) set({ selectedProjectId: s.config.projects[0]?.id ?? null });
-    return ok;
+    const err = await s.persist({ ...s.config, projects: s.config.projects.filter(x => x.id !== id) });
+    if (!err && s.selectedProjectId === id) set({ selectedProjectId: s.config.projects[0]?.id ?? null });
+    return err;
   },
   copyProject: async (id) => {
     const s = get(); const src = s.config.projects.find(p => p.id === id); if (!src) return null;
     const clone: Project = { ...src, id: `prj-${Date.now().toString(36)}`, name: `${src.name} (副本)`, createdAt: new Date().toISOString() };
-    await s.upsertProject(clone); return clone;
+    // 持久化被拒（构建/离线任务运行中）时不返回副本，避免 UI 选中一个未落库的项目
+    const err = await s.upsertProject(clone);
+    return err ? null : clone;
   },
   upsertProgram: async (projectId, prog) => {
-    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return false;
+    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return `project_not_found:${projectId}`;
     const exists = prj.programs.some(x => x.id === prog.id);
     const programs = exists ? prj.programs.map(x => x.id === prog.id ? prog : x) : [...prj.programs, prog];
     return s.upsertProject({ ...prj, programs });
   },
   removeProgram: async (projectId, id) => {
-    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return false;
+    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return `project_not_found:${projectId}`;
     return s.upsertProject({ ...prj, programs: prj.programs.filter(x => x.id !== id) });
   },
   saveGlobal: async (patch) => {

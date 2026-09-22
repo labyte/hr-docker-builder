@@ -4,6 +4,7 @@ import { App, Button, Checkbox, Dropdown, Input, List, Modal, Segmented, Tooltip
 import { CloudFilled, CopyFilled, DeleteFilled, HomeFilled, EditFilled, FolderOpenFilled, PlusOutlined, SaveFilled } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
+import { errText } from '../utils';
 import type { Outputs, Project } from '../types';
 
 const OUTPUT_KEYS: (keyof Outputs)[] = ['exportFile', 'loadLocal', 'push'];
@@ -67,7 +68,7 @@ export default function ProjectSidebar() {
             { key: 'delete', icon: <DeleteFilled />, label: t('table.delete'), danger: true,
               onClick: () => modal.confirm({
                 title: t('sidebar.deleteConfirm', { name: p.name }), okText: t('common.ok'), cancelText: t('common.cancel'), okButtonProps: { danger: true },
-                onOk: async () => { const ok = await removeProject(p.id); if (!ok) message.warning(t('errors.saveBlocked')); },
+                onOk: async () => { const err = await removeProject(p.id); if (err) message.warning(errText(err)); },
               }) },
           ];
           return (
@@ -112,7 +113,7 @@ export default function ProjectSidebar() {
         </Button>
       </div>
       <ProjectEditModal open={editOpen} initial={editing} onClose={() => setEditOpen(false)}
-        onSave={async (p) => { const ok = await upsertProject(p); if (ok) message.success(t('common.saved')); }} />
+        onSave={async (p) => { const err = await upsertProject(p); if (!err) message.success(t('common.saved')); else message.warning(errText(err)); }} />
     </div>
   );
 }

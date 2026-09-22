@@ -4,6 +4,7 @@ import { App, Button, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography 
 import { DeleteFilled, EditFilled, WarningFilled } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../store';
+import { errText } from '../utils';
 import type { Program, StatusEvent } from '../types';
 
 const STATUS_COLOR: Record<string, string> = { running:'processing', success:'success', failed:'error', canceled:'default', skipped:'default' };
@@ -71,8 +72,8 @@ export default function ProgramTable({ onEdit }: Props) {
         <Space size={4}>
           <Button size="small" type="text" icon={<EditFilled />} disabled={running} onClick={() => onEdit(r)} />
           <Popconfirm title={t('table.deleteConfirm')} onConfirm={async () => {
-            const ok = await removeProgram(selectedProjectId!, r.id);
-            if (!ok) message.warning(t('errors.saveBlocked'));
+            const err = await removeProgram(selectedProjectId!, r.id);
+            if (err) message.warning(errText(err));
           }} okText={t('common.ok')} cancelText={t('common.cancel')}>
             <Button size="small" type="text" danger icon={<DeleteFilled />} disabled={running} />
           </Popconfirm>
@@ -92,7 +93,7 @@ export default function ProgramTable({ onEdit }: Props) {
             onChange: keys => {
               if (!selectedProjectId) return;
               void setProgramsEnabled(selectedProjectId, keys.map(String))
-                .then(ok => { if (!ok) message.warning(t('errors.saveBlocked')); });
+                .then(err => { if (err) message.warning(errText(err)); });
             },
             getCheckboxProps: () => ({ disabled: running }),
           }}

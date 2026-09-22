@@ -185,7 +185,9 @@
   },
   "errors": {
     "queue_running": "已有构建队列在运行中",
-    "offline_busy": "离线包任务进行中，请稍后再试",
+    "busy_export": "正在执行「导出离线包」，请等待完成后再操作",
+    "busy_import": "正在执行「导入离线包」，请等待完成后再操作",
+    "busy_repair": "正在执行「一键修复」，请等待完成后再操作",
     "mirror_not_imported": "未找到离线包导入记录，请先「导入离线包」",
     "mirror_rebuild_failed": "在线重建 registry 容器失败：{{msg}}（无外网且本地无 registry:2 镜像时，请重新「导入离线包」）",
     "mirror_refill_failed": "registry 容器已重建，但从上游回填镜像数据失败：{{msg}}（无外网时请重新「导入离线包」）",
@@ -204,8 +206,7 @@
     "context_invalid": "存在构建上下文无效的项目",
     "docker_load_failed": "docker load 失败",
     "docker_push_failed": "docker push 失败（请确认 docker login）",
-    "build_failed": "构建失败，详见日志",
-    "saveBlocked": "构建或离线包任务运行中，暂不可修改配置"
+    "build_failed": "构建失败，详见日志"
   },
   "about": {
     "title": "关于",

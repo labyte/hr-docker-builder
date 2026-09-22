@@ -32,25 +32,35 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
   const selectedId = useStore((s) => s.selectedProjectId);
   const selectedProject = useStore((s) => s.config.projects.find(p => p.id === s.selectedProjectId));
   const setLang = useStore((s) => s.setLang);
-  const [offlineBusy, setOfflineBusy] = useState(false);
+  // 离线任务忙碌标记由 store 统一维护（queue-done / repairMirror 清理），跨组件互斥提示同源
+  const offlineOp = useStore((s) => s.offlineOp);
+  const setOfflineOp = useStore((s) => s.setOfflineOp);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scope, setScope] = useState<'all' | 'current'>('all');
+
+  // 已有离线任务在跑：点击其他离线操作时即时提示具体是哪个任务
+  const busyWarn = (): boolean => {
+    if (offlineOp) { message.warning(t(`errors.busy_${offlineOp}`)); return true; }
+    return false;
+  };
 
   const confirmExport = async () => {
     setScopeOpen(false);
     const dir = await openDialog({ directory: true });
     if (!dir || typeof dir !== 'string') { setScope('all'); return; }
-    setOfflineBusy(true);
-    try { await api.exportOfflinePack(dir, scope === 'current' ? selectedId : null); } catch (e) { message.error(errText(e)); }
-    setOfflineBusy(false);
+    setOfflineOp('export');
+    // invoke 成功仅代表任务已提交（后台执行），忙碌标记保持到 queue-done；被拒（互斥/校验）则立即复位
+    try { await api.exportOfflinePack(dir, scope === 'current' ? selectedId : null); }
+    catch (e) { setOfflineOp(null); message.error(errText(e)); }
     setScope('all');
   };
   const handleImport = async () => {
+    if (busyWarn()) return;
     const dir = await openDialog({ directory: true });
     if (!dir || typeof dir !== 'string') return;
-    setOfflineBusy(true);
-    try { await api.importOfflinePack(dir); } catch (e) { message.error(errText(e)); }
-    setOfflineBusy(false);
+    setOfflineOp('import');
+    try { await api.importOfflinePack(dir); }
+    catch (e) { setOfflineOp(null); message.error(errText(e)); }
   };
 
   return (
@@ -59,10 +69,11 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
         <div style={groupStyle}>
           <span style={{ color: '#8c8c8c', fontSize: 12, flexShrink: 0 }}>{t('toolbar.packGroup')}</span>
           <Tooltip title={t('toolbar.packExportTip')}>
-            <Button size="small" icon={<UploadOutlined />} loading={offlineBusy} onClick={() => setScopeOpen(true)}>{t('toolbar.packExport')}</Button>
+            <Button size="small" icon={<UploadOutlined />} loading={offlineOp === 'export'}
+              onClick={() => { if (busyWarn()) return; setScopeOpen(true); }}>{t('toolbar.packExport')}</Button>
           </Tooltip>
           <Tooltip title={t('toolbar.packImportTip')}>
-            <Button size="small" icon={<DownloadOutlined />} loading={offlineBusy} onClick={() => void handleImport()}>{t('toolbar.packImport')}</Button>
+            <Button size="small" icon={<DownloadOutlined />} loading={offlineOp === 'import'} onClick={() => void handleImport()}>{t('toolbar.packImport')}</Button>
           </Tooltip>
         </div>
         {/* 下拉触发按钮不挂 Tooltip，避免悬浮提示遮挡菜单 */}

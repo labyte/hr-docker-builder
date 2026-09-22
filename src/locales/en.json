@@ -185,7 +185,9 @@
   },
   "errors": {
     "queue_running": "A build queue is already running",
-    "offline_busy": "An offline pack task is running; please try again later",
+    "busy_export": "Offline pack export is in progress; please wait for it to finish",
+    "busy_import": "Offline pack import is in progress; please wait for it to finish",
+    "busy_repair": "Mirror repair is in progress; please wait for it to finish",
     "mirror_not_imported": "No offline pack import records found; use \"Import offline pack\" first",
     "mirror_rebuild_failed": "Failed to rebuild registry container online: {{msg}} (without internet and a local registry:2 image, re-import the offline pack)",
     "mirror_refill_failed": "Registry container rebuilt, but refilling image data from upstream failed: {{msg}} (without internet, re-import the offline pack)",
@@ -204,8 +206,7 @@
     "context_invalid": "Some projects have an invalid context dir",
     "docker_load_failed": "docker load failed",
     "docker_push_failed": "docker push failed (check docker login)",
-    "build_failed": "Build failed, see logs",
-    "saveBlocked": "Config is locked while a build or offline pack task runs"
+    "build_failed": "Build failed, see logs"
   },
   "about": {
     "title": "About",

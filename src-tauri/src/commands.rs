@@ -15,8 +15,9 @@ use chrono::Local;
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub queue_cancel: Mutex<Option<Arc<AtomicBool>>>,
-    /// 离线包导出/导入占用标志：与构建队列及自身互斥（防并发互踩、防中途改配置）
-    pub offline_busy: Mutex<Option<Arc<AtomicBool>>>,
+    /// 离线任务（导出/导入/一键修复）占用标志：与构建队列及自身互斥（防并发互踩、防中途改配置）；
+    /// 记录占用方的错误 key（busy_export / busy_import / busy_repair），互斥拒绝时原样上报，前端据此提示具体在忙什么
+    pub offline_busy: Mutex<Option<&'static str>>,
     /// 配置文件损坏通知：load 时记录，get_config 时冲刷为事件（此时前端监听已就绪）
     pub corrupt_notices: Mutex<Vec<crate::types::ConfigCorruptEvent>>,
 }
@@ -33,12 +34,12 @@ impl Drop for OfflineGuard {
 
 /// 互斥检查（锁序固定：queue_cancel → offline_busy，各处一致以杜绝交叉竞态）；
 /// 通过则占用 offline_busy，返回 Err 表示被谁挡下
-fn acquire_offline(state: &State<'_, AppState>) -> Result<(), String> {
+fn acquire_offline(state: &State<'_, AppState>, busy_key: &'static str) -> Result<(), String> {
     let q = state.queue_cancel.lock().unwrap();
     let mut b = state.offline_busy.lock().unwrap();
     if q.is_some() { return Err("queue_running".into()); }
-    if b.is_some() { return Err("offline_busy".into()); }
-    *b = Some(Arc::new(AtomicBool::new(false)));
+    if let Some(k) = *b { return Err(k.into()); }
+    *b = Some(busy_key);
     Ok(())
 }
 
@@ -59,7 +60,7 @@ pub fn save_config(app: AppHandle, state: State<AppState>, config: AppConfig) ->
         let q = state.queue_cancel.lock().unwrap();
         let b = state.offline_busy.lock().unwrap();
         if q.is_some() { return Err("queue_running".into()); }
-        if b.is_some() { return Err("offline_busy".into()); }
+        if let Some(k) = *b { return Err(k.into()); }
     }
     project_store::save(&app, &config)?;
     *state.config.lock().unwrap() = config.clone();
@@ -103,7 +104,7 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), dfs)
     };
     let regs = offline_pack::load_registries(&root).ok_or_else(|| "mirror_not_imported".to_string())?;
-    acquire_offline(&state)?;
+    acquire_offline(&state, "busy_repair")?;
     let _guard = OfflineGuard(app.clone());
     let rid = Local::now().format("repair-%Y%m%d-%H%M%S").to_string();
     offline_pack::repair_registries(&app, &rid, &regs, &dockerfiles).await?;
@@ -136,7 +137,7 @@ pub fn start_build(app: AppHandle, state: State<AppState>, req: StartBuildReques
     {
         let mut q = state.queue_cancel.lock().unwrap();
         let b = state.offline_busy.lock().unwrap();
-        if b.is_some() { return Err("offline_busy".into()); }
+        if let Some(k) = *b { return Err(k.into()); }
         if q.is_some() { return Err("queue_running".into()); }
         *q = Some(Arc::new(AtomicBool::new(false)));
     }
@@ -237,7 +238,7 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
         .map(|p| p.dockerfile.clone())
         .collect();
     if dockerfiles.is_empty() { return Err("no_dockerfiles".into()); }
-    acquire_offline(&state)?; // 与构建队列及另一次导出/导入互斥
+    acquire_offline(&state, "busy_export")?; // 与构建队列及另一次导出/导入/修复互斥
     let rid = Local::now().format("offline-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
@@ -261,7 +262,7 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
 
 #[tauri::command]
 pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pack_dir: String) -> Result<String, String> {
-    acquire_offline(&state)?; // 与构建队列及另一次导出/导入互斥；导入期间禁止改配置（root 已固定）
+    acquire_offline(&state, "busy_import")?; // 与构建队列及另一次导出/导入/修复互斥；导入期间禁止改配置（root 已固定）
     let (builder, root) = {
         let cfg = state.config.lock().unwrap();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))

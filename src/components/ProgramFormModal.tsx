@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { App, Button, Col, Form, Input, Modal, Row, Space, Tag } from 'antd';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
-import { baseName, dirOf, joinPath } from '../utils';
+import { baseName, dirOf, errText, joinPath } from '../utils';
 import type { Program } from '../types';
 
 interface Props { open: boolean; initial: Program | null; onClose: () => void }
@@ -60,8 +60,8 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
       context: (v.context ?? '').trim(), image: v.image.trim(), defaultVersion: v.defaultVersion.trim() || 'latest', buildArgs: parseBuildArgs(argsText),
       enabled: initial?.enabled ?? true, nugetPackagesDir: initial?.nugetPackagesDir ?? '', lastBuild: initial?.lastBuild ?? null,
     };
-    const ok = await upsertProgram(selectedProjectId!, prog);
-    if (ok) { message.success(t('form.saved')); onClose(); } else { message.warning(t('errors.saveBlocked')); }
+    const err = await upsertProgram(selectedProjectId!, prog);
+    if (!err) { message.success(t('form.saved')); onClose(); } else { message.warning(errText(err)); }
   };
 
   return (
