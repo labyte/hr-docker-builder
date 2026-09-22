@@ -241,6 +241,19 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
         .map_err(|e| format!("恢复本机架构 tag 失败: {e}"))
 }
 
+/// 单个镜像的多架构 mirror 到本地 registry（导出与在线修复共用）：
+/// buildkit 直连复制优先（瞬时故障自动重试续传；固定 --builder default——绕开 hr-builder
+/// 可能挂载的 mirror 配置，且其容器内 localhost 目标不可达），
+/// 直连通路被 CDN 持续 CANCEL 时回退守护进程逐平台中转
+pub async fn mirror_one_image(app: &AppHandle, run_id: &str, orig: &str, target: &str) -> Result<(), String> {
+    if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "--builder", "default", "-t", target, orig], 2).await {
+        emit_line(app, run_id, &format!("buildkit 直连复制失败（{}），回退守护进程逐平台中转", brief_err(&e)), "stderr");
+        return mirror_via_daemon(app, run_id, orig, target).await
+            .map_err(|e2| format!("复制多架构失败 {orig}: 直连[{}] 回退[{}]", brief_err(&e), brief_err(&e2)));
+    }
+    Ok(())
+}
+
 /// 供 commands 使用：若 mirror 配置存在（导入离线包生成于数据根目录），返回 buildkitd.toml 路径
 pub fn offline_mirror_config(root: &Path) -> Option<String> {
     let toml = root.join("offline").join("buildkitd.toml");
@@ -274,9 +287,63 @@ pub fn load_registries(root: &Path) -> Option<Vec<RegistryEntry>> {
     serde_json::from_str(&raw).ok()
 }
 
-/// 拉起已存在的 registry 容器（镜像数据在容器内；容器被删则需重新导入离线包）
+/// 拉起已存在的 registry 容器（镜像数据在容器内；容器被删可经 repair_registries 在线重建回填，或重新导入离线包）
 pub async fn start_registry(name: &str) -> Result<(), String> {
     run_ok(&["start", name]).await
+}
+
+/// 一键修复（在线机）：registry 容器还在（含已停止）则直接拉起；已被删除则用 registry:2 在线重建
+/// （镜像通常本机就有：导出/导入通道都带），再按当前各项目 Dockerfile 的 FROM 引用从上游回填
+/// 多架构 mirror 数据——在线机无需"导出再导入"即可自愈；无外网且本地无 registry:2 时才要求重新导入
+pub async fn repair_registries(
+    app: &AppHandle,
+    run_id: &str,
+    regs: &[RegistryEntry],
+    dockerfiles: &[String],
+) -> Result<(), String> {
+    let mut rebuilt: Vec<&RegistryEntry> = Vec::new();
+    for r in regs {
+        let name = format!("hr-offline-reg-{}", r.index);
+        let exists = docker_cmd().args(["inspect", &name]).output().await
+            .map(|o| o.status.success()).unwrap_or(false);
+        if exists {
+            start_registry(&name).await.map_err(|e| format!("拉起 {name} 失败: {e}"))?;
+            continue;
+        }
+        emit_line(app, run_id, &format!("registry 容器 {name} 缺失，在线重建（{} → :{}）...", r.host, r.port), "stdout");
+        let bind = format!("{}:{}:5000", publish_bind(), r.port);
+        run_stream(app, run_id, &["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"]).await
+            .map_err(|e| format!("mirror_rebuild_failed: {e}"))?;
+        rebuilt.push(r);
+    }
+    if rebuilt.is_empty() { return Ok(()); }
+
+    // 收集当前各项目 Dockerfile 的 FROM 引用，按重建 registry 对应的上游 host 回填
+    let mut seen = HashSet::new();
+    let mut bases: Vec<String> = Vec::new();
+    for df in dockerfiles {
+        for img in images_from_file(df) {
+            if seen.insert(img.clone()) { bases.push(img); }
+        }
+    }
+    for r in &rebuilt {
+        let mut count = 0usize;
+        for b in &bases {
+            if let Some((host, path)) = split_ref(b) {
+                if host != r.host { continue; }
+                count += 1;
+                let target = format!("localhost:{}/{}", r.port, path);
+                emit_line(app, run_id, &format!("在线回填 mirror {b} → {target}"), "stdout");
+                mirror_one_image(app, run_id, b, &target).await
+                    .map_err(|e| format!("mirror_refill_failed: {e}"))?;
+            }
+        }
+        if count == 0 {
+            emit_line(app, run_id, &format!("提示：当前各项目 Dockerfile 没有来自 {} 的基础镜像，该 registry 暂为空（构建时 buildkit 会自动回源上游）", r.host), "stderr");
+        }
+    }
+    emit_line(app, run_id, &format!("{} 个 registry 容器已在线重建并回填完成", rebuilt.len()), "stdout");
+    Ok(())
 }
 
 /// buildkit mirror 寻址：
@@ -367,18 +434,11 @@ pub async fn export_pack(
         }
 
         // 5. 多架构复制：imagetools 把 manifest list + 全部平台 blobs 原样推入本地 registry
-        //（瞬时故障自动重试续传；buildkit 直连通路被 CDN 持续 CANCEL 时回退守护进程逐平台中转）
-        // 固定 --builder default（docker 驱动）：绕开 hr-builder 可能挂载的 mirror 配置，
-        // 且 hr-builder 容器内 localhost 目标不可达
         for (orig, host, path) in &mirrorable {
             let r = &regs[host];
             let target = format!("localhost:{}/{}", r.port, path);
             emit_line(app, run_id, &format!("复制多架构 {orig} → {target}"), "stdout");
-            if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "--builder", "default", "-t", &target, orig], 2).await {
-                emit_line(app, run_id, &format!("buildkit 直连复制失败（{}），回退守护进程逐平台中转", brief_err(&e)), "stderr");
-                mirror_via_daemon(app, run_id, orig, &target).await
-                    .map_err(|e2| format!("复制多架构失败 {orig}: 直连[{}] 回退[{}]", brief_err(&e), brief_err(&e2)))?;
-            }
+            mirror_one_image(app, run_id, orig, &target).await?;
         }
 
         // 6. 导出 registry 卷数据（cp 大目录无进度输出，心跳提示兜底）

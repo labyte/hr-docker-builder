@@ -88,22 +88,25 @@ pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<Env
     Ok(env)
 }
 
-/// 一键修复离线 mirror：拉起本地 registry 容器 → 以 mirror 配置重建 builder（复用导入自举流程）。
-/// 前提是本机导入过离线包（registries.json 存在）；容器被删（数据随容器保存）则需重新导入。
+/// 一键修复离线 mirror：拉起/在线重建本地 registry 容器（被删时按当前项目 Dockerfile 从上游回填
+/// mirror 数据，在线机无需"导出再导入"）→ 以 mirror 配置重建 builder（复用导入自举流程）。
+/// 前提是本机导入过离线包（registries.json 存在）；无外网且容器数据已丢时才需重新导入。
 #[tauri::command]
 pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    let (builder, root) = {
+    let (builder, root, dockerfiles) = {
         let cfg = state.config.lock().unwrap();
-        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+        let dfs = cfg.projects.iter()
+            .flat_map(|p| p.programs.iter())
+            .filter(|p| !p.dockerfile.is_empty())
+            .map(|p| p.dockerfile.clone())
+            .collect::<Vec<_>>();
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), dfs)
     };
     let regs = offline_pack::load_registries(&root).ok_or_else(|| "mirror_not_imported".to_string())?;
     acquire_offline(&state)?;
     let _guard = OfflineGuard(app.clone());
     let rid = Local::now().format("repair-%Y%m%d-%H%M%S").to_string();
-    for r in &regs {
-        offline_pack::start_registry(&format!("hr-offline-reg-{}", r.index))
-            .await.map_err(|_| "mirror_container_missing".to_string())?;
-    }
+    offline_pack::repair_registries(&app, &rid, &regs, &dockerfiles).await?;
     offline_pack::bootstrap_offline_env(&app, &builder, &rid, &root).await
 }
 
