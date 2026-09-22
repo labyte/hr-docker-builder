@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Modal, Radio, Space, Tooltip, Typography } from 'antd';
-import { DownCircleOutlined, UpCircleOutlined, GlobalOutlined, SettingOutlined } from '@ant-design/icons';
+import { DownloadOutlined, UploadOutlined, GlobalOutlined, SettingOutlined } from '@ant-design/icons';
 
 // 立体感图标按钮：白底 + 描边 + 轻投影；图标统一黑白 + drop-shadow 微浮雕
 const btnStyle: React.CSSProperties = {
@@ -11,6 +11,12 @@ const btnStyle: React.CSSProperties = {
 };
 const lift: React.CSSProperties = {
   color: '#262626', fontSize: 13, filter: 'drop-shadow(0 1px 0.4px rgba(0,0,0,.30))',
+};
+// 离线包分组框：组名 + 导出/导入文字按钮——含义一目了然，详细说明放在悬浮提示
+const groupStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  background: '#fff', border: '1px solid #e0e2e8', borderRadius: 8, padding: '2px 8px',
+  boxShadow: '0 1.5px 4px rgba(20,30,60,.14), inset 0 -1px 0 rgba(20,30,60,.04)',
 };
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
@@ -50,14 +56,15 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
   return (
     <>
       <Space size={16}>
-        <Tooltip title={t('toolbar.exportPack')}>
-          <Button shape="circle" size="small" style={btnStyle}
-            icon={<span style={lift}><UpCircleOutlined /></span>} loading={offlineBusy} onClick={() => setScopeOpen(true)} />
-        </Tooltip>
-        <Tooltip title={t('toolbar.importPack')}>
-          <Button shape="circle" size="small" style={btnStyle}
-            icon={<span style={lift}><DownCircleOutlined /></span>} loading={offlineBusy} onClick={() => void handleImport()} />
-        </Tooltip>
+        <div style={groupStyle}>
+          <span style={{ color: '#8c8c8c', fontSize: 12, flexShrink: 0 }}>{t('toolbar.packGroup')}</span>
+          <Tooltip title={t('toolbar.packExportTip')}>
+            <Button size="small" icon={<UploadOutlined />} loading={offlineBusy} onClick={() => setScopeOpen(true)}>{t('toolbar.packExport')}</Button>
+          </Tooltip>
+          <Tooltip title={t('toolbar.packImportTip')}>
+            <Button size="small" icon={<DownloadOutlined />} loading={offlineBusy} onClick={() => void handleImport()}>{t('toolbar.packImport')}</Button>
+          </Tooltip>
+        </div>
         {/* 下拉触发按钮不挂 Tooltip，避免悬浮提示遮挡菜单 */}
         <Dropdown menu={{ items: [{ key: 'settings', label: t('toolbar.settings') }, { key: 'about', label: t('toolbar.about') }], onClick: ({ key }) => (key === 'settings' ? onOpenSettings() : onOpenAbout()) }}>
           <Button shape="circle" size="small" style={btnStyle} icon={<span style={lift}><SettingOutlined /></span>} />

@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Col, Form, Input, InputNumber, Menu, Modal, Row, Switch, Typography } from 'antd';
+import { App, Button, Col, Form, Input, InputNumber, Menu, Modal, Row, Space, Switch, Typography } from 'antd';
 import {
-  CloudFilled, DatabaseFilled, HddFilled, SettingFilled, TagsFilled, ThunderboltFilled,
+  CloudFilled, DatabaseFilled, HddFilled, InfoCircleFilled, ReloadOutlined, SettingFilled, TagsFilled, ThunderboltFilled,
   FolderOpenFilled,
 } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
+import { errText } from '../utils';
+import EnvInfoPanel, { deriveCaps } from './EnvInfo';
 
 interface Props { open: boolean; onClose: () => void }
 
-type Section = 'build' | 'registry' | 'naming' | 'data' | 'nuget';
+type Section = 'build' | 'registry' | 'naming' | 'data' | 'nuget' | 'env';
 
 // Docker Desktop 风格：左侧分区菜单，右侧对应表单，各分区独立保存互不影响
 export default function SettingsModal({ open, onClose }: Props) {
@@ -24,13 +26,17 @@ export default function SettingsModal({ open, onClose }: Props) {
   const [nugetForm] = Form.useForm();
   const global = useStore((s) => s.config.global);
   const saveGlobal = useStore((s) => s.saveGlobal);
+  const env = useStore((s) => s.env);
+  const envBusy = useStore((s) => s.envBusy);
+  const refreshEnv = useStore((s) => s.refreshEnv);
+  const installQemu = useStore((s) => s.installQemu);
 
   useEffect(() => {
     if (!open) return;
     setActive('build');
     buildForm.setFieldsValue({ concurrency: global.concurrency, failFast: global.failFast, buildArgPresets: (global.buildArgPresets ?? []).join('\n') });
     registryForm.setFieldsValue({ registry: global.registry });
-    namingForm.setFieldsValue({ builderName: global.builderName, tagTemplate: global.tagTemplate });
+    namingForm.setFieldsValue({ builderName: global.builderName, exportArchSuffix: global.exportArchSuffix });
     dataForm.setFieldsValue({ dataDir: global.dataDir });
     nugetForm.setFieldsValue({ nugetPackagesDir: global.nugetPackagesDir });
   }, [open, global, buildForm, registryForm, namingForm, dataForm, nugetForm]);
@@ -57,6 +63,7 @@ export default function SettingsModal({ open, onClose }: Props) {
       { key: 'naming', icon: <TagsFilled />, label: t('settings.menuNaming') },
       { key: 'data', icon: <DatabaseFilled />, label: t('settings.menuData') },
       { key: 'nuget', icon: <HddFilled />, label: t('settings.menuNuget') },
+      { key: 'env', icon: <InfoCircleFilled />, label: t('settings.menuEnv') },
     ],
     onClick: ({ key }: { key: string }) => setActive(key as Section),
   };
@@ -113,10 +120,10 @@ export default function SettingsModal({ open, onClose }: Props) {
               <Form.Item name="builderName" label={t('settings.builderName')} extra={t('settings.builderNameDesc')}>
                 <Input placeholder="hr-builder" />
               </Form.Item>
-              <Form.Item name="tagTemplate" label={t('settings.tagTemplate')}>
-                <Input placeholder="{version}-{arch}-{time}" />
+              <Form.Item name="exportArchSuffix" label={t('settings.exportArchSuffix')} valuePropName="checked" extra={t('settings.exportArchSuffixHint')}>
+                <Switch />
               </Form.Item>
-              <SaveBtn primary onClick={() => void saveSection(namingForm, (v) => ({ builderName: v.builderName.trim() || 'hr-builder', tagTemplate: v.tagTemplate.trim() || '{version}-{arch}-{time}' }))} />
+              <SaveBtn primary onClick={() => void saveSection(namingForm, (v) => ({ builderName: v.builderName.trim() || 'hr-builder', exportArchSuffix: !!v.exportArchSuffix }))} />
             </Form>
           )}
 
@@ -162,6 +169,22 @@ export default function SettingsModal({ open, onClose }: Props) {
               </Form.Item>
               <SaveBtn primary onClick={() => void saveSection(nugetForm, (v) => ({ nugetPackagesDir: (v.nugetPackagesDir ?? '').trim() }))} />
             </Form>
+          )}
+
+          {active === 'env' && (
+            <div>
+              {sectionTitle(t('settings.menuEnv'), t('settings.envDesc'))}
+              {/* 与顶栏「环境信息」弹层同源：已安装工具 / 提供的能力 / 支持平台 */}
+              <EnvInfoPanel env={env} />
+              <Space style={{ marginTop: 14 }}>
+                <Button icon={<ReloadOutlined />} loading={envBusy} onClick={() => void refreshEnv()}>{t('toolbar.refreshEnv')}</Button>
+                {env && !deriveCaps(env).qemu && (
+                  <Button type="primary" ghost loading={envBusy} onClick={async () => {
+                    try { await installQemu(); message.success(t('env.qemuOk')); } catch (e) { message.error(errText(e)); }
+                  }}>{t('env.installQemu')}</Button>
+                )}
+              </Space>
+            </div>
           )}
 
         </div>

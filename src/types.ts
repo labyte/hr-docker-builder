@@ -8,7 +8,8 @@ export interface GlobalSettings {
   language: string;
   registry: string;
   builderName: string;
-  tagTemplate: string;
+  /** 导出文件名是否带架构标识（{镜像名}-{版本}-{架构}.tar）；镜像 tag 本身不含时间/架构 */
+  exportArchSuffix: boolean;
   concurrency: number;
   failFast: boolean;
   /** 数据目录（projects/logs/exports），留空为系统默认 */
@@ -67,6 +68,8 @@ export interface EnvInfo {
   builderPlatforms: string[];
   dockerVersion: string;
   buildxVersion: string;
+  /** 宿主架构（amd64/arm64，后端已归一化）：同架构走 default builder 本机镜像优先 */
+  hostArch: string;
 }
 
 export interface StartBuildRequest {

@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::shell::docker_cmd;
 
-use crate::types::{BuildTask, LogEvent, Outputs};
+use crate::types::{BuildTask, LogEvent, Outputs, Program};
 
 pub async fn execute(
     app: &AppHandle,
@@ -22,7 +22,8 @@ pub async fn execute(
         return Err("registry_not_configured".into());
     }
 
-    let tag = render_tag(&task.tag_template, &task.program.default_version, &task.arch, &task.ts);
+    // 镜像 tag 直接取程序设置的默认版本（不带时间/架构标识）；双架构产物靠导出文件名区分
+    let tag = image_tag(&task.program);
     let local_tag = format!("{}:{}", task.program.image, tag);
     let registry_tag = if push {
         Some(format!("{}/{}:{}", task.registry.trim_end_matches('/'), task.program.image, tag))
@@ -31,7 +32,7 @@ pub async fn execute(
     };
 
     let tar_path = if export_file {
-        Some(export_path(&task.export_dir, &task.program.image, &tag))
+        Some(export_path(&task.export_dir, &task.program.image, &export_label(task)))
     } else {
         None
     };
@@ -80,8 +81,11 @@ pub async fn execute(
             args.push("--push".into());
         }
     }
-    // 上下文：程序级优先，空则跟随项目设置
-    let context = if !task.program.context.trim().is_empty() { task.program.context.as_str() } else { task.project_context_dir.as_str() };
+    // 上下文回退链：程序级 → 项目级 → Dockerfile 所在目录（与 validate_request 保持一致）
+    let df_parent = std::path::Path::new(&task.program.dockerfile).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let context = if !task.program.context.trim().is_empty() { task.program.context.as_str() }
+                  else if !task.project_context_dir.trim().is_empty() { task.project_context_dir.as_str() }
+                  else { df_parent.as_str() };
     if context.trim().is_empty() { return Err(format!("context_invalid:{}", task.program.id)); }
     args.push(context.into());
 
@@ -133,8 +137,17 @@ async fn step(app: &AppHandle, task: &BuildTask, log_file: &std::path::Path, can
     Ok(())
 }
 
-fn render_tag(template: &str, version: &str, arch: &str, time: &str) -> String {
-    template.replace("{version}", version).replace("{arch}", arch).replace("{time}", time)
+/// 镜像 tag：直接用程序设置的默认版本（不带时间/架构标识）；版本为空时兜底 latest
+fn image_tag(program: &Program) -> String {
+    let v = program.default_version.trim();
+    if v.is_empty() { "latest".to_string() } else { v.to_string() }
+}
+
+/// 导出文件名标识：版本，按全局设置可选追加架构后缀——
+/// 镜像 tag 不含架构，双架构构建靠架构标识区分两份 tar；关闭时后写覆盖先写
+pub fn export_label(task: &BuildTask) -> String {
+    let v = image_tag(&task.program);
+    if task.export_arch_suffix { format!("{v}-{}", task.arch) } else { v }
 }
 
 pub fn export_path(export_dir: &str, image: &str, tag: &str) -> String {

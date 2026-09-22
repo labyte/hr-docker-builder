@@ -37,6 +37,11 @@ fn main() {
         .manage(AppState::default())
         .setup(|app| {
             use tauri::Manager;
+            // 窗口标题追加版本号：运行时取 tauri.conf.json 的 version，升版本无需手动同步
+            if let Some(win) = app.get_webview_window("main") {
+                let base = app.config().product_name.as_deref().unwrap_or("HR Docker Builder");
+                let _ = win.set_title(&format!("{base} v{}", app.package_info().version));
+            }
             // 启动即加载配置，保证环境检测/构建读取到同一份数据
             let cfg = project_store::load(app.handle()).unwrap_or_default();
             let state = app.state::<AppState>();

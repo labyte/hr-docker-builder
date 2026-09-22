@@ -23,7 +23,9 @@ pub struct GlobalSettings {
     pub language: String,
     pub registry: String,
     pub builder_name: String,
-    pub tag_template: String,
+    /// 导出文件名是否带架构标识：{镜像名}-{版本}-{架构}.tar；
+    /// 镜像 tag 本身固定为 {镜像名}:{默认版本}（不含时间/架构），双架构产物靠文件名区分
+    pub export_arch_suffix: bool,
     pub concurrency: usize,
     pub fail_fast: bool,
     /// 数据目录（projects/logs/exports/offline）；留空使用系统默认应用数据目录
@@ -39,7 +41,7 @@ impl Default for GlobalSettings {
             language: "auto".into(),
             registry: String::new(),
             builder_name: "hr-builder".into(),
-            tag_template: "{version}-{arch}-{time}".into(),
+            export_arch_suffix: true,
             concurrency: 1,
             fail_fast: false,
             data_dir: String::new(),
@@ -165,11 +167,10 @@ pub struct BuildTask {
     pub project_context_dir: String,
     pub registry: String,
     pub builder_name: String,
-    pub tag_template: String,
+    pub export_arch_suffix: bool,
     pub outputs: Outputs,
     pub export_dir: String,
     pub log_dir: PathBuf,
-    pub ts: String,
 }
 
 // ── 事件负载 ──

@@ -11,7 +11,7 @@ export const defaultOutputs = (): Outputs => ({ exportFile: true, loadLocal: fal
 
 const defaultConfig = (): AppConfig => ({
   version: 1,
-  global: { language: 'auto', registry: '', builderName: 'hr-builder', tagTemplate: '{version}-{arch}-{time}', concurrency: 1, failFast: false, dataDir: '', buildArgPresets: [], nugetPackagesDir: '' },
+  global: { language: 'auto', registry: '', builderName: 'hr-builder', exportArchSuffix: true, concurrency: 1, failFast: false, dataDir: '', buildArgPresets: [], nugetPackagesDir: '' },
   projects: [],
 });
 
@@ -24,13 +24,13 @@ export interface BuilderState {
   envBusy: boolean;
   selectedProjectId: string | null;
 
-  // 当前选中项目的设置（工具栏绑定）
+  // 当前选中项目的设置（工具栏绑定）；并发/失败策略以 config.global 为唯一数据源
   arch: string;
   outputs: Outputs;
-  concurrency: number;
-  failFast: boolean;
 
   running: boolean;
+  /** 本次构建总任务数（程序数 × 架构数），进度条分母 */
+  totalTasks: number;
   statuses: Record<string, Record<string, StatusEvent>>;
   logs: Record<string, LogLine[]>;
   allLogs: LogLine[];
@@ -70,9 +70,8 @@ export const useStore = create<BuilderState>((set, get) => ({
   selectedProjectId: null,
   arch: 'amd64',
   outputs: defaultOutputs(),
-  concurrency: 1,
-  failFast: false,
   running: false,
+  totalTasks: 0,
   statuses: {},
   logs: {},
   allLogs: [],
@@ -108,8 +107,6 @@ export const useStore = create<BuilderState>((set, get) => ({
         selectedProjectId: config.projects[0]?.id ?? null,
         arch: config.projects[0]?.defaultArch ?? 'amd64',
         outputs: config.projects[0]?.outputs ?? defaultOutputs(),
-        concurrency: config.global.concurrency,
-        failFast: config.global.failFast,
       });
       if (!localStorage.getItem('ui-lang') && config.global.language !== 'auto') {
         void i18n.changeLanguage(config.global.language);
@@ -140,8 +137,8 @@ export const useStore = create<BuilderState>((set, get) => ({
   },
   setArch: (a) => { set({ arch: a }); updateProject(get, a); },
   setOutputs: (o) => { set({ outputs: o }); updateProject(get, undefined, o); },
-  setConcurrency: (n) => { set({ concurrency: n }); get().saveGlobal({ concurrency: n }); },
-  setFailFast: (b) => { set({ failFast: b }); get().saveGlobal({ failFast: b }); },
+  setConcurrency: (n) => { void get().saveGlobal({ concurrency: n }); },
+  setFailFast: (b) => { void get().saveGlobal({ failFast: b }); },
 
   upsertProject: async (p) => {
     const s = get(); const exists = s.config.projects.some(x => x.id === p.id);
@@ -187,8 +184,8 @@ export const useStore = create<BuilderState>((set, get) => ({
     const programIds = (prj?.programs ?? []).filter(p => p.enabled).map(p => p.id);
     if (!programIds.length) return 'no_projects';
     try {
-      await api.startBuild({ programIds, projectId: s.selectedProjectId!, arches, outputs: s.outputs, concurrency: s.concurrency, failFast: s.failFast, exportDir: prj?.exportDir ?? '' });
-      set({ running: true, summary: null, statuses: {} });
+      await api.startBuild({ programIds, projectId: s.selectedProjectId!, arches, outputs: s.outputs, concurrency: s.config.global.concurrency, failFast: s.config.global.failFast, exportDir: prj?.exportDir ?? '' });
+      set({ running: true, summary: null, statuses: {}, totalTasks: programIds.length * arches.length });
       return null;
     } catch (e) { return String(e); }
   },

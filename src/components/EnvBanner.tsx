@@ -1,11 +1,24 @@
 import { useTranslation } from 'react-i18next';
-import { App, Button, Space } from 'antd';
+import { App, Button, Popover, Space } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, ReloadOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { errText } from '../utils';
 import GlobalActions from './GlobalActions';
+import EnvInfoPanel from './EnvInfo';
+import QuickSettings from './QuickSettings';
+import type { EnvInfo } from '../types';
 
 interface Props { onOpenSettings: () => void; onOpenAbout: () => void }
+
+// 环境信息弹层：点击展示已安装工具 / 提供的能力 / 支持平台——状态栏只保留状态与提示，窗口变窄不再换行
+function EnvInfoButton({ env }: { env: EnvInfo | null }) {
+  const { t } = useTranslation();
+  return (
+    <Popover trigger="click" title={t('env.info')} content={<EnvInfoPanel env={env} width={360} />}>
+      <Button size="small" type="link">{t('env.info')}</Button>
+    </Popover>
+  );
+}
 
 export default function EnvBanner({ onOpenSettings, onOpenAbout }: Props) {
   const { t } = useTranslation();
@@ -42,7 +55,6 @@ export default function EnvBanner({ onOpenSettings, onOpenAbout }: Props) {
     return <CompactBar color="warning" icon={<ExclamationCircleFilled />} label={t('env.builderMissing', { builder: '' })} actions={actions} right={right} />;
   }
 
-  const plat = env.builderPlatforms.join(', ');
   const missingArch = !env.builderPlatforms.some(p => p.includes('arm64')) || !env.builderPlatforms.some(p => p.includes('amd64'));
   if (missingArch) {
     actions.push(
@@ -51,28 +63,30 @@ export default function EnvBanner({ onOpenSettings, onOpenAbout }: Props) {
       }}>{t('env.installQemu')}</Button>
     );
   }
+  // 环境信息按钮排在引导动作之后，保持安装引导突出
+  actions.push(<EnvInfoButton key="env" env={env} />);
 
-  return <CompactBar color="success" icon={<CheckCircleFilled />} label={`Docker ✓ ${plat ? `Plat: ${plat}` : ''}`} actions={actions} right={right} />;
+  return <CompactBar color="success" icon={<CheckCircleFilled />} label="Docker ✓" actions={actions} right={right} />;
 }
 
 function CompactBar({ color, icon, label, actions, right }: { color: string; icon: React.ReactNode; label: string; actions?: React.ReactNode[]; right?: React.ReactNode }) {
   const bg = color === 'success' ? '#f6ffed' : color === 'warning' ? '#fffbe6' : '#fff2f0';
   const bd = color === 'success' ? '#b7eb8f' : color === 'warning' ? '#ffe58f' : '#ffa39e';
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 38, fontSize: 12 }}>
-      {/* 状态段：背景色只作用于 Docker 状态本身 */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: bg, borderBottom: `1px solid ${bd}` }}>
-        <span style={{ color: color === 'success' ? '#52c41a' : color === 'warning' ? '#faad14' : '#ff4d4f' }}>{icon}</span>
-        <span style={{ flex: 1 }}>{label}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 38, fontSize: 12, padding: '4px 12px', background: '#f7f8fa', borderBottom: '1px solid #e5e6eb' }}>
+      {/* Docker 状态区：圆角边框盒子，宽度随内容自适应，不再拉通整行 */}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '3px 4px 3px 10px', background: bg, border: `1px solid ${bd}`, borderRadius: 8, minWidth: 0 }}>
+        <span style={{ color: color === 'success' ? '#52c41a' : color === 'warning' ? '#faad14' : '#ff4d4f', flexShrink: 0 }}>{icon}</span>
+        <span style={{ minWidth: 0 }}>{label}</span>
         {actions && actions.length > 0 && <Space size={4}>{actions}</Space>}
         <Button size="small" type="text" icon={<ReloadOutlined />} loading={false} onClick={() => void useStore.getState().refreshEnv()} />
       </div>
-      {/* 全局功能区：独立中性底，与状态解耦 */}
-      {right && (
-        <div style={{ display: 'flex', alignItems: 'center', padding: '6px 16px', background: '#f7f8fa', borderLeft: '1px solid #ececf1', borderBottom: '1px solid #e5e6eb' }}>
-          {right}
-        </div>
-      )}
+      {/* 快捷构建设置：并发数/失败策略（高频项，与设置弹窗双向同步）——靠右与全局功能区相邻 */}
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        <QuickSettings />
+      </div>
+      {/* 全局功能区：固定在栏右端 */}
+      {right && <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{right}</div>}
     </div>
   );
 }

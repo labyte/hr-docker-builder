@@ -9,6 +9,38 @@ import type { Outputs } from '../types';
 
 const OUTPUT_KEYS: (keyof Outputs)[] = ['exportFile', 'loadLocal', 'push'];
 
+// 前端省略：保留末两级目录，突出最后文件夹名，完整路径见悬浮提示
+function shortenPath(p: string): string {
+  if (!p) return '…';
+  const segs = p.replace(/[\\/]+$/, '').split(/[\\/]+/).filter(Boolean);
+  if (segs.length === 0) return p;
+  const tail = segs.slice(-2).join('/');
+  return segs.length > 2 ? `…/${tail}` : tail;
+}
+
+const pillStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 5,
+  border: '1px solid #d9d9d9', borderRadius: 8, padding: '2px 10px',
+  fontSize: 12, background: '#fff', maxWidth: 260, verticalAlign: 'middle',
+};
+
+// 目录胶囊链接：label 标签区分用途 + 文件夹图标 + 短路径，点击打开所在目录
+function DirLink({ label, color, path, tip }: { label: string; color: string; path: string; tip: string }) {
+  const { message } = App.useApp();
+  return (
+    <Tooltip title={tip}>
+      <a
+        onClick={async () => { try { if (path) await api.revealPath(path); } catch (e) { message.error(errText(e)); } }}
+        style={pillStyle}
+      >
+        <span style={{ color: '#8c8c8c', flexShrink: 0 }}>{label}</span>
+        <FolderOpenFilled style={{ color, flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortenPath(path)}</span>
+      </a>
+    </Tooltip>
+  );
+}
+
 interface Props { onAddProgram: () => void }
 
 export default function Toolbar({ onAddProgram }: Props) {
@@ -29,14 +61,7 @@ export default function Toolbar({ onAddProgram }: Props) {
     api.getExportDir(selectedProject?.exportDir ?? '').then(setExportPath).catch(() => setExportPath(''));
   }, [selectedId, selectedProject?.exportDir]);
 
-  // 前端省略：保留末两级目录，突出最后文件夹名，完整路径见悬浮提示
-  const shortExportPath = (() => {
-    if (!exportPath) return '…';
-    const segs = exportPath.replace(/[\\/]+$/, '').split(/[\\/]+/).filter(Boolean);
-    if (segs.length === 0) return exportPath;
-    const tail = segs.slice(-2).join('/');
-    return segs.length > 2 ? `…/${tail}` : tail;
-  })();
+  const contextDir = selectedProject?.contextDir ?? '';
 
   return (
     <div className="toolbar">
@@ -55,19 +80,22 @@ export default function Toolbar({ onAddProgram }: Props) {
         </span>
       </Tooltip>
 
+      {/* 目录胶囊：镜像导出目录（勾选「镜像文件」时）+ 项目构建上下文目录（已设置时） */}
       {selectedId && outputs.exportFile && (
-        <Tooltip title={`${t('toolbar.openExportDir')}：${exportPath || '…'}`}>
-          <a
-            onClick={async () => {
-              try { if (exportPath) await api.revealPath(exportPath); } catch (e) { message.error(errText(e)); }
-            }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid #d9d9d9', borderRadius: 8, padding: '2px 10px', fontSize: 12, background: '#fff', maxWidth: 260, verticalAlign: 'middle' }}
-          >
-            <FolderOpenFilled style={{ color: '#fa8c16', flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortExportPath}</span>
-          </a>
-        </Tooltip>
+        <DirLink label={t('sidebar.imageDir')} color="#fa8c16" path={exportPath} tip={`${t('toolbar.openExportDir')}：${exportPath || '…'}`} />
       )}
+      {selectedId && (contextDir.trim() ? (
+        <DirLink label={t('sidebar.contextDir')} color="#1677ff" path={contextDir.trim()} tip={`${t('toolbar.openContextDir')}：${contextDir.trim()}`} />
+      ) : (
+        /* 项目未设置上下文目录：展示默认回退规则（各程序跟随其 Dockerfile 所在目录），无可定位路径故不可点击 */
+        <Tooltip title={t('toolbar.contextDefaultTip')}>
+          <span style={{ ...pillStyle, cursor: 'default' }}>
+            <span style={{ color: '#8c8c8c', flexShrink: 0 }}>{t('sidebar.contextDir')}</span>
+            <FolderOpenFilled style={{ color: '#bfbfbf', flexShrink: 0 }} />
+            <span style={{ color: '#8c8c8c', whiteSpace: 'nowrap' }}>{t('toolbar.contextDefaultLabel')}</span>
+          </span>
+        </Tooltip>
+      ))}
 
       {/* 添加程序：靠左、圆形纯图标按钮 */}
       <Tooltip title={t('table.add')}>

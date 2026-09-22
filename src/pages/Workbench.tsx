@@ -7,6 +7,7 @@ import ProgramFormModal from '../components/ProgramFormModal';
 import SettingsModal from '../components/SettingsModal';
 import AboutModal from '../components/AboutModal';
 import LogPanel from '../components/LogPanel';
+import BuildProgress from '../components/BuildProgress';
 import { useStore } from '../store';
 import type { Program } from '../types';
 
@@ -98,6 +99,8 @@ export default function Workbench() {
             ><span className="splitter-grip" /></div>
             <div className="right"><LogPanel /></div>
           </div>
+          {/* 工作区底部构建进度条：控制台之外、不横跨侧栏；无构建时隐藏不占空间 */}
+          <BuildProgress />
         </div>
       </div>
       <ProgramFormModal open={formOpen} initial={editing} onClose={() => setFormOpen(false)} />

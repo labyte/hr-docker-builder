@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { getVersion } from '@tauri-apps/api/app';
 import { App as AntdApp, ConfigProvider, Spin } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import enUS from 'antd/locale/en_US';
@@ -31,6 +32,11 @@ export default function App() {
   useEffect(() => {
     init().finally(() => setReady(true));
   }, [init]);
+
+  // 页面标题同步版本号（兜底 WebView 以 document.title 为准的场景；与 Rust setup 的窗口标题一致）
+  useEffect(() => {
+    getVersion().then(v => { document.title = `HR Docker Builder v${v}`; }).catch(() => {});
+  }, []);
 
   return (
     <ConfigProvider

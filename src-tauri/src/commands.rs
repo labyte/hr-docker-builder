@@ -133,8 +133,11 @@ fn validate_request(state: &State<AppState>, req: &StartBuildRequest) -> Result<
     for pid in &req.program_ids {
         let Some(prog) = project.programs.iter().find(|x| &x.id == pid) else { return Err(format!("program_not_found:{pid}")); };
         if prog.dockerfile.trim().is_empty() || !std::path::Path::new(&prog.dockerfile).is_file() { return Err(format!("dockerfile_invalid:{pid}")); }
-        // 上下文：程序级为空则跟随项目级 context_dir
-        let ctx = if prog.context.trim().is_empty() { project.context_dir.as_str() } else { prog.context.as_str() };
+        // 上下文回退链：程序级 → 项目级 → Dockerfile 所在目录（与 docker_exec 保持一致）
+        let df_parent = std::path::Path::new(&prog.dockerfile).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let ctx = if !prog.context.trim().is_empty() { prog.context.as_str() }
+                  else if !project.context_dir.trim().is_empty() { project.context_dir.as_str() }
+                  else { df_parent.as_str() };
         if ctx.trim().is_empty() || !std::path::Path::new(ctx).is_dir() { return Err(format!("context_invalid:{pid}")); }
     }
     Ok(())
