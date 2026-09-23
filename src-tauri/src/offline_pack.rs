@@ -287,6 +287,34 @@ pub fn load_registries(root: &Path) -> Option<Vec<RegistryEntry>> {
     serde_json::from_str(&raw).ok()
 }
 
+/// 未导入离线包时在线自建：从各项目 Dockerfile 的 FROM 引用推导上游 registry 清单
+/// （host 去重分组、端口预解析，与 export_pack 2/2.5 步同法；digest 固定引用不可镜像，跳过）
+pub fn derive_registries(dockerfiles: &[String]) -> Vec<RegistryEntry> {
+    let mut seen = HashSet::new();
+    let mut regs: BTreeMap<String, RegistryEntry> = BTreeMap::new();
+    for df in dockerfiles {
+        for img in images_from_file(df) {
+            if !seen.insert(img.clone()) { continue; }
+            let Some((host, _)) = split_ref(&img) else { continue };
+            if !regs.contains_key(&host) {
+                let index = regs.len();
+                regs.insert(host.clone(), RegistryEntry { host, port: free_port(5000 + index as u16), index });
+            }
+        }
+    }
+    regs.into_values().collect()
+}
+
+/// 在线自建完成后写回注册表与 mirror 配置（root/offline/）：
+/// 后续 probe 显示已导入、再次修复走原路径（与 import_pack 第 3 步同法）
+pub fn write_registries(root: &Path, regs: &[RegistryEntry]) -> std::io::Result<()> {
+    let off_dir = root.join("offline");
+    fs::create_dir_all(&off_dir)?;
+    fs::write(off_dir.join("buildkitd.toml"), mirror_toml(regs))?;
+    let j = serde_json::to_string_pretty(regs).map_err(std::io::Error::other)?;
+    fs::write(off_dir.join("registries.json"), j)
+}
+
 /// 拉起已存在的 registry 容器（镜像数据在容器内；容器被删可经 repair_registries 在线重建回填，或重新导入离线包）
 pub async fn start_registry(name: &str) -> Result<(), String> {
     run_ok(&["start", name]).await

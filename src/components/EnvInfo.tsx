@@ -84,7 +84,7 @@ export default function EnvInfoPanel({ env, width }: { env: EnvInfo | null; widt
             </>
           )}
         </div>
-        {mirror.imported && !mirrorReady && (
+        {!mirrorReady && (
           <Button size="small" type="link" style={{ paddingLeft: 0, marginTop: 2 }} loading={envBusy}
             onClick={async () => {
               const err = await repairMirror();
