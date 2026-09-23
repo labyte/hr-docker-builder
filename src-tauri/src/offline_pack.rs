@@ -230,8 +230,9 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
         refs.push(t);
     }
 
-    // 4. 纯本地合成 manifest list（源与目标都在 localhost，不再触达上游 CDN）
-    let mut args: Vec<&str> = vec!["buildx", "imagetools", "create", "--builder", "default", "-t", target];
+    // 4. 纯本地合成 manifest list（源与目标都在 localhost，不再触达上游 CDN）；
+    // 不传 --builder：用当前上下文的默认 docker-driver builder（原因见 mirror_one_image 注释）
+    let mut args: Vec<&str> = vec!["buildx", "imagetools", "create", "-t", target];
     args.extend(refs.iter().map(|s| s.as_str()));
     run_ok(&args).await.map_err(|e| format!("本地合成 manifest 失败: {e}"))?;
 
@@ -242,11 +243,12 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
 }
 
 /// 单个镜像的多架构 mirror 到本地 registry（导出与在线修复共用）：
-/// buildkit 直连复制优先（瞬时故障自动重试续传；固定 --builder default——绕开 hr-builder
-/// 可能挂载的 mirror 配置，且其容器内 localhost 目标不可达），
+/// buildkit 直连复制优先（瞬时故障自动重试续传；不传 --builder——使用当前上下文的默认
+/// docker-driver builder，绕开 hr-builder 可能挂载的 mirror 配置且其容器内 localhost
+/// 目标不可达；显式 --builder default 在上下文非 default 时会报 context 切换错误），
 /// 直连通路被 CDN 持续 CANCEL 时回退守护进程逐平台中转
 pub async fn mirror_one_image(app: &AppHandle, run_id: &str, orig: &str, target: &str) -> Result<(), String> {
-    if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "--builder", "default", "-t", target, orig], 2).await {
+    if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "-t", target, orig], 2).await {
         emit_line(app, run_id, &format!("buildkit 直连复制失败（{}），回退守护进程逐平台中转", brief_err(&e)), "stderr");
         return mirror_via_daemon(app, run_id, orig, target).await
             .map_err(|e2| format!("复制多架构失败 {orig}: 直连[{}] 回退[{}]", brief_err(&e), brief_err(&e2)));

@@ -38,7 +38,7 @@ pub async fn execute(
         None
     };
 
-    // 同架构 → default(docker 驱动) builder：FROM 优先解析本机 docker 镜像库，
+    // 同架构 → 当前上下文的默认 docker-driver builder：FROM 优先解析本机 docker 镜像库，
     // 离线环境下本机有基础镜像即可构建；缺省才走外网。
     // 交叉架构 → 仍用 docker-container（hr-builder）：需要 QEMU/独立缓存，
     // 该驱动不共享本机镜像库，离线机请先导入离线包并保证 builder 就绪。
@@ -46,11 +46,17 @@ pub async fn execute(
 
     let mut args: Vec<String> = vec![
         "buildx".into(), "build".into(),
-        "--builder".into(), if use_default { "default".into() } else { task.builder_name.clone() },
         "--progress".into(), "plain".into(),
         "--platform".into(), format!("linux/{}", task.arch),
         "-f".into(), task.program.dockerfile.clone(),
     ];
+    // 同架构不传 --builder：使用当前 docker 上下文的默认 docker-driver builder（FROM 优先本机镜像库）。
+    // 显式 --builder default 在上下文非 default（如 Docker Desktop 的 desktop-linux）时
+    // 会报 "use docker --context=default buildx" 错误；docker-container 构建器不受此限，交叉架构仍显式指定
+    if !use_default {
+        args.push("--builder".into());
+        args.push(task.builder_name.clone());
+    }
 
     // tag 策略
     let push_native = !use_default && push && tar_path.is_none() && !load_local;
