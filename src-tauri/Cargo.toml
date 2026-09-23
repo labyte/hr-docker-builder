@@ -1,6 +1,6 @@
 [package]
 name = "hr-docker-builder"
-version = "0.1.10"
+version = "0.2.1"
 description = "HR Docker 批量构建工具 / Batch Docker image builder"
 edition = "2021"
 
