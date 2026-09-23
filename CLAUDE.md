@@ -17,4 +17,4 @@
 
 ## CI 构建
 
-`.github/workflows/build.yml`：推送到 `main` 或 tag `v*` 自动触发 macOS / Linux / Windows 三平台构建；仅 tag 推送会额外发布 GitHub Release。
+`.github/workflows/build.yml`：仅推送 tag `v*` 自动触发 macOS / Linux / Windows 三平台构建并发布 GitHub Release；`main` 推送不触发（手动构建可用 workflow_dispatch）。
