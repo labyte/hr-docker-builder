@@ -1,9 +1,8 @@
 name: Build Multi-Platform
 
 on:
+  # 仅 tag 触发构建与发布；main 推送不再触发（如需手动构建可用 workflow_dispatch）
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
