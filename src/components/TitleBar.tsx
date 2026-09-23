@@ -93,20 +93,20 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
 
   const renderEnvStatus = () => {
     if (!env) {
-      return <EnvPill color="warning" icon={<ExclamationCircleFilled />} label={t('env.checking')} />;
+      return <EnvPill color="warning" icon={<ExclamationCircleFilled />} label={t('env.checking')} refresh />;
     }
     if (!env.dockerOk) {
-      return <EnvPill color="error" icon={<CloseCircleFilled />} label={t('env.dockerMissing')} />;
+      return <EnvPill color="error" icon={<CloseCircleFilled />} label={t('env.dockerMissing')} refresh />;
     }
     if (!env.buildxOk) {
-      return <EnvPill color="error" icon={<CloseCircleFilled />} label={t('env.buildxMissing')} />;
+      return <EnvPill color="error" icon={<CloseCircleFilled />} label={t('env.buildxMissing')} refresh />;
     }
     if (!env.daemonOk) {
-      return <EnvPill color="warning" icon={<ExclamationCircleFilled />} label={t('env.daemonMissing')} />;
+      return <EnvPill color="warning" icon={<ExclamationCircleFilled />} label={t('env.daemonMissing')} refresh />;
     }
     if (!env.builderOk) {
       return (
-        <EnvPill color="warning" icon={<ExclamationCircleFilled />} label={t('env.builderMissing', { builder: '' })}
+        <EnvPill color="warning" icon={<ExclamationCircleFilled />} label={t('env.builderMissing', { builder: '' })} refresh
           actions={<Button size="small" type="link" loading={envBusy} onClick={async () => {
             try { await fixBuilder(); message.success(t('env.fixOk')); } catch (e) { message.error(errText(e)); }
           }}>{t('env.fix')}</Button>}
@@ -124,7 +124,7 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
     }
     actions.push(<EnvInfoButton key="env" env={env} />);
     return (
-      <EnvPill color="success" icon={<CheckCircleFilled />} label="Docker ✓"
+      <EnvPill color="success" icon={<CheckCircleFilled />} label="Docker ✓" refresh
         actions={<Space size={4}>{actions}</Space>}
       />
     );
@@ -135,7 +135,6 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
       <div className="titlebar-left" data-tauri-drag-region>
         <span className="titlebar-title" data-tauri-drag-region>HR Docker Builder</span>
         {renderEnvStatus()}
-        <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => void useStore.getState().refreshEnv()} style={{ marginLeft: 2 }} />
       </div>
       <div className="titlebar-center" data-tauri-drag-region>
         <TaskIndicator />
@@ -148,15 +147,15 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
   );
 }
 
-function EnvPill({ color, icon, label, actions }: { color: string; icon: React.ReactNode; label: string; actions?: React.ReactNode }) {
-  const bg = color === 'success' ? '#f6ffed' : color === 'warning' ? '#fffbe6' : '#fff2f0';
-  const bd = color === 'success' ? '#b7eb8f' : color === 'warning' ? '#ffe58f' : '#ffa39e';
+function EnvPill({ color, icon, label, actions, refresh }: { color: string; icon: React.ReactNode; label: string; actions?: React.ReactNode; refresh?: boolean }) {
   const ic = color === 'success' ? '#52c41a' : color === 'warning' ? '#faad14' : '#ff4d4f';
+  const bd = color === 'success' ? '#b7eb8f' : color === 'warning' ? '#ffe58f' : '#ffa39e';
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 4px 2px 8px', background: bg, border: `1px solid ${bd}`, borderRadius: 6, fontSize: 12, minWidth: 0 }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 4px 2px 4px', borderBottom: `2px solid ${bd}`, fontSize: 12, minWidth: 0 }}>
       <span style={{ color: ic, flexShrink: 0 }}>{icon}</span>
       <span style={{ minWidth: 0, whiteSpace: 'nowrap' }}>{label}</span>
       {actions}
+      {refresh && <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => void useStore.getState().refreshEnv()} style={{ padding: '0 4px' }} />}
     </div>
   );
 }
