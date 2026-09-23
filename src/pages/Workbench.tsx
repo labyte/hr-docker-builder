@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import EnvBanner from '../components/EnvBanner';
+import TitleBar from '../components/TitleBar';
 import Toolbar from '../components/Toolbar';
 import ProjectSidebar from '../components/ProjectSidebar';
 import ProgramTable from '../components/ProgramTable';
@@ -72,7 +72,7 @@ export default function Workbench() {
 
   return (
     <div className="page">
-      <EnvBanner onOpenSettings={() => setSettingsOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
+      <TitleBar onOpenSettings={() => setSettingsOpen(true)} onOpenAbout={() => setAboutOpen(true)} />
       <div ref={mainRef} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ width: sidebarPx, flex: `0 0 ${sidebarPx}px`, overflow: 'hidden' }}>
           <ProjectSidebar />

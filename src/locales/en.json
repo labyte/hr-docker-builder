@@ -33,7 +33,11 @@
     "packImport": "Import",
     "packExportTip": "Export offline pack: bundle the base & tool images required for builds; copy it to an offline machine and import it there to build without network",
     "packImportTip": "Import offline pack: load the images and configure the offline build environment on this machine",
-    "cancelPack": "Cancel"
+    "cancelPack": "Cancel",
+    "taskBuilding": "Building",
+    "taskExporting": "Exporting offline pack",
+    "taskImporting": "Importing offline pack",
+    "taskRepairing": "Repairing offline environment"
   },
   "sidebar": {
     "title": "Projects",

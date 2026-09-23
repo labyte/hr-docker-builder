@@ -33,7 +33,11 @@
     "packImport": "导入",
     "packExportTip": "导出离线包：打包构建所需的基础镜像与工具镜像，拷贝到无外网的机器导入后即可离线构建",
     "packImportTip": "导入离线包：在本机导入离线包，自动加载镜像并配置离线构建环境",
-    "cancelPack": "取消"
+    "cancelPack": "取消",
+    "taskBuilding": "构建中",
+    "taskExporting": "导出离线包中",
+    "taskImporting": "导入离线包中",
+    "taskRepairing": "修复离线环境中"
   },
   "sidebar": {
     "title": "项目",

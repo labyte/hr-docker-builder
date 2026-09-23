@@ -21,6 +21,99 @@ body,
   background: #fff;
 }
 
+/* 自定义标题栏：替代原生标题栏，集成环境状态、快捷设置、全局操作与窗口控制 */
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 0 0 12px;
+  background: linear-gradient(180deg, #f8f9fc 0%, #eef0f5 100%);
+  border-bottom: 1px solid #d5d7de;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+.titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a5e6e;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+.titlebar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+.titlebar-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 6px;
+  background: #e6f4ff;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #1677ff;
+  white-space: nowrap;
+}
+.titlebar-task-cancel {
+  color: #1677ff;
+  padding: 0 2px;
+}
+.titlebar-task-cancel:hover {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.08);
+}
+.titlebar-controls {
+  display: flex;
+  align-items: stretch;
+  height: 40px;
+  margin-left: 4px;
+}
+.titlebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: #5a5e6e;
+  cursor: pointer;
+  transition: background 0.15s;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.titlebar-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+.titlebar-btn:active {
+  background: rgba(0, 0, 0, 0.12);
+}
+.titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
 /* 垂直布局：上方项目列表，可拖拽分隔条，下方构建控制台 */
 .split {
   flex: 1;
