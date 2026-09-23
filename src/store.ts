@@ -63,6 +63,7 @@ export interface BuilderState {
   saveGlobal: (patch: Partial<AppConfig['global']>) => Promise<string | null>;
   startBuild: () => Promise<string | null>;
   cancelBuild: () => Promise<void>;
+  cancelOffline: () => Promise<void>;
   clearLogs: () => void;
   setLang: (l: string) => void;
 }
@@ -208,6 +209,7 @@ export const useStore = create<BuilderState>((set, get) => ({
   },
 
   cancelBuild: () => api.cancelBuild(),
+  cancelOffline: () => api.cancelOffline(),
   clearLogs: () => set({ logs: {}, allLogs: [], summary: null }),
   setLang: (l) => { localStorage.setItem('ui-lang', l); void i18n.changeLanguage(l); get().saveGlobal({ language: l }); },
 }));

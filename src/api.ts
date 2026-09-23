@@ -9,6 +9,7 @@ export const api = {
   installQemu: () => invoke<string>('install_qemu'),
   startBuild: (req: StartBuildRequest) => invoke<string>('start_build', { req }),
   cancelBuild: () => invoke<void>('cancel_build'),
+  cancelOffline: () => invoke<void>('cancel_offline'),
   revealPath: (path: string) => invoke<void>('reveal_path', { path }),
   getExportDir: (exportDir: string) => invoke<string>('get_export_dir', { exportDir }),
   exportOfflinePack: (destDir: string, projectId?: string | null) => invoke<string>('export_offline_pack', { destDir, projectId: projectId ?? null }),

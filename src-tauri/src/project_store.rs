@@ -99,3 +99,77 @@ pub fn validate(cfg: &AppConfig) -> Vec<PathIssue> {
     }
     issues
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Program, Project};
+
+    fn cfg_with_program(prog: Program) -> AppConfig {
+        AppConfig {
+            projects: vec![Project {
+                id: "p1".into(),
+                programs: vec![prog],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn validate_empty_config_no_issues() {
+        let cfg = AppConfig::default();
+        assert!(validate(&cfg).is_empty());
+    }
+
+    #[test]
+    fn validate_empty_fields_no_issues() {
+        let prog = Program::default();
+        let cfg = cfg_with_program(prog);
+        assert!(validate(&cfg).is_empty());
+    }
+
+    #[test]
+    fn validate_nonexistent_dockerfile() {
+        let prog = Program { dockerfile: "/nonexistent/Dockerfile".into(), ..Default::default() };
+        let issues = validate(&cfg_with_program(prog));
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].field, "dockerfile");
+    }
+
+    #[test]
+    fn validate_nonexistent_context() {
+        let prog = Program { context: "/nonexistent/dir".into(), ..Default::default() };
+        let issues = validate(&cfg_with_program(prog));
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].field, "context");
+    }
+
+    #[test]
+    fn validate_nonexistent_project_file() {
+        let prog = Program { project_file: "/nonexistent/app.csproj".into(), ..Default::default() };
+        let issues = validate(&cfg_with_program(prog));
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].field, "projectFile");
+    }
+
+    #[test]
+    fn validate_multiple_issues() {
+        let prog = Program {
+            dockerfile: "/no/Dockerfile".into(),
+            context: "/no/dir".into(),
+            project_file: "/no/app.csproj".into(),
+            ..Default::default()
+        };
+        let issues = validate(&cfg_with_program(prog));
+        assert_eq!(issues.len(), 3);
+    }
+
+    #[test]
+    fn validate_existing_dir_no_context_issue() {
+        let dir = std::env::temp_dir();
+        let prog = Program { context: dir.to_string_lossy().to_string(), ..Default::default() };
+        let issues = validate(&cfg_with_program(prog));
+        assert!(issues.iter().all(|i| i.field != "context"));
+    }
+}

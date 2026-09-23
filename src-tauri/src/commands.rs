@@ -22,12 +22,13 @@ pub struct AppState {
     pub corrupt_notices: Mutex<Vec<crate::types::ConfigCorruptEvent>>,
 }
 
-/// 离线任务兜底守卫：正常结束或 panic 都释放 offline_busy 占用
+/// 离线任务兜底守卫：正常结束或 panic 都释放 offline_busy 占用并清除 queue_cancel（与构建 QueueGuard 同责）
 struct OfflineGuard(AppHandle);
 impl Drop for OfflineGuard {
     fn drop(&mut self) {
         if let Some(st) = self.0.try_state::<AppState>() {
             if let Ok(mut b) = st.offline_busy.lock() { *b = None; }
+            if let Ok(mut q) = st.queue_cancel.lock() { *q = None; }
         }
     }
 }
@@ -112,8 +113,10 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
     if regs.is_empty() { return Err("mirror_no_dockerfiles".into()); }
     acquire_offline(&state, "busy_repair")?;
     let _guard = OfflineGuard(app.clone());
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.queue_cancel.lock().unwrap() = Some(cancel.clone());
     let rid = Local::now().format("repair-%Y%m%d-%H%M%S").to_string();
-    offline_pack::repair_registries(&app, &rid, &regs, &dockerfiles).await?;
+    offline_pack::repair_registries(&app, &rid, &regs, &dockerfiles, &cancel).await?;
     // 自建路径写回注册表（buildkitd.toml + registries.json），后续按已导入处理
     if loaded.is_none() {
         offline_pack::write_registries(&root, &regs).map_err(|e| format!("写离线 mirror 注册表失败: {e}"))?;
@@ -199,6 +202,11 @@ pub fn cancel_build(state: State<AppState>) {
     if let Some(flag) = state.queue_cancel.lock().unwrap().as_ref() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
 }
 
+#[tauri::command]
+pub fn cancel_offline(state: State<AppState>) {
+    if let Some(flag) = state.queue_cancel.lock().unwrap().as_ref() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
+}
+
 /// 解析当前生效的导出目录：项目设置了就用它，否则数据根目录/exports；确保存在后返回
 #[tauri::command]
 pub fn get_export_dir(app: AppHandle, state: State<'_, AppState>, export_dir: String) -> Result<String, String> {
@@ -249,21 +257,31 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
         .collect();
     if dockerfiles.is_empty() { return Err("no_dockerfiles".into()); }
     acquire_offline(&state, "busy_export")?; // 与构建队列及另一次导出/导入/修复互斥
+    let root = effective_root(&app, &cfg.global);
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.queue_cancel.lock().unwrap() = Some(cancel.clone());
     let rid = Local::now().format("offline-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
     let did = dest_dir.clone();
+    let log_dir = root.join("logs").join(format!("run-{rid}"));
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_dir_str = log_dir.to_string_lossy().to_string();
     tauri::async_runtime::spawn(async move {
         let _guard = OfflineGuard(app2.clone());
         use crate::types::{LogEvent, QueueDone};
-        match offline_pack::export_pack(&app2, dockerfiles, &did, &rid2).await {
+        match offline_pack::export_pack(&app2, dockerfiles, &did, &rid2, &cancel).await {
             Ok(m) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("成功[{scope_label}]: {} 个镜像（含多架构 mirror 数据）→ {}/offline-pack", m.images.len(), did.trim_end_matches('/')), stream: "stdout".into() });
-                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack", did.trim_end_matches('/'))], log_dir: dest_dir.clone() });
+                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![format!("{}/offline-pack", did.trim_end_matches('/'))], log_dir: log_dir_str });
+            }
+            Err(e) if e == "canceled" => {
+                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: "导出已取消".into(), stream: "stderr".into() });
+                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 0, failed: 0, canceled: 1, skipped: 0, export_files: vec![], log_dir: log_dir_str });
             }
             Err(e) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导出失败: {e}"), stream: "stderr".into() });
-                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: dest_dir });
+                let _ = app2.emit("queue-done", QueueDone { kind: "export".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: log_dir_str });
             }
         }
     });
@@ -277,27 +295,37 @@ pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pac
         let cfg = state.config.lock().unwrap();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
     };
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.queue_cancel.lock().unwrap() = Some(cancel.clone());
     let rid = Local::now().format("import-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
     let tp = pack_dir.clone();
     let bn = builder.clone();
+    let log_dir = root.join("logs").join(format!("run-{rid}"));
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_dir_str = log_dir.to_string_lossy().to_string();
     tauri::async_runtime::spawn(async move {
         let _guard = OfflineGuard(app2.clone());
         use crate::types::{LogEvent, QueueDone};
-        if let Err(e) = offline_pack::import_pack(&app2, &tp, &rid2, &root).await {
-            let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导入失败: {e}"), stream: "stderr".into() });
-            let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
+        if let Err(e) = offline_pack::import_pack(&app2, &tp, &rid2, &root, &cancel).await {
+            if e == "canceled" {
+                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: "导入已取消".into(), stream: "stderr".into() });
+                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 0, canceled: 1, skipped: 0, export_files: vec![], log_dir: log_dir_str });
+            } else {
+                let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("导入失败: {e}"), stream: "stderr".into() });
+                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: log_dir_str });
+            }
             return;
         }
         match offline_pack::bootstrap_offline_env(&app2, &bn, &rid2, &root).await {
             Ok(msg) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: msg, stream: "stdout".into() });
-                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
+                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: log_dir_str });
             }
             Err(e) => {
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: format!("自举失败: {e}"), stream: "stderr".into() });
-                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: tp });
+                let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 0, failed: 1, canceled: 0, skipped: 0, export_files: vec![], log_dir: log_dir_str });
             }
         }
     });

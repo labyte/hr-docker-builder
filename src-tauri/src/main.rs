@@ -57,6 +57,7 @@ fn main() {
             commands::install_qemu,
             commands::start_build,
             commands::cancel_build,
+            commands::cancel_offline,
             commands::reveal_path,
             commands::get_export_dir,
             commands::export_offline_pack,

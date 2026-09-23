@@ -87,3 +87,68 @@ pub async fn ensure_builder(builder: &str, config: Option<&str>) -> Result<EnvIn
 pub async fn install_qemu() -> Result<String, String> {
     out(&["run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "all"]).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_arch_x86_64() {
+        assert_eq!(normalize_arch("x86_64"), "amd64");
+    }
+
+    #[test]
+    fn normalize_arch_aarch64() {
+        assert_eq!(normalize_arch("aarch64"), "arm64");
+    }
+
+    #[test]
+    fn normalize_arch_already_canonical() {
+        assert_eq!(normalize_arch("amd64"), "amd64");
+        assert_eq!(normalize_arch("arm64"), "arm64");
+    }
+
+    #[test]
+    fn normalize_arch_case_insensitive() {
+        assert_eq!(normalize_arch("X86_64"), "amd64");
+        assert_eq!(normalize_arch("Aarch64"), "arm64");
+    }
+
+    #[test]
+    fn normalize_arch_unknown_passthrough() {
+        assert_eq!(normalize_arch("riscv64"), "riscv64");
+    }
+
+    #[test]
+    fn parse_platforms_typical() {
+        let text = "\
+Name:          hr-builder
+Driver:        docker-container
+Last Activity: 2026-01-01
+Platforms:     linux/amd64, linux/arm64
+";
+        let plats = parse_platforms(text);
+        assert_eq!(plats, vec!["linux/amd64", "linux/arm64"]);
+    }
+
+    #[test]
+    fn parse_platforms_single() {
+        let text = "Platforms: linux/amd64";
+        assert_eq!(parse_platforms(text), vec!["linux/amd64"]);
+    }
+
+    #[test]
+    fn parse_platforms_missing() {
+        let text = "Name: hr-builder\nDriver: docker-container";
+        assert!(parse_platforms(text).is_empty());
+    }
+
+    #[test]
+    fn parse_platforms_extra_whitespace() {
+        let text = "Platforms:  linux/amd64 , linux/arm64 , linux/riscv64 ";
+        let plats = parse_platforms(text);
+        assert_eq!(plats.len(), 3);
+        assert_eq!(plats[0], "linux/amd64");
+        assert_eq!(plats[2], "linux/riscv64");
+    }
+}

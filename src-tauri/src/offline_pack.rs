@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -102,12 +104,14 @@ async fn run_ignore(args: &[&str]) { let _ = docker_cmd().args(args).output().aw
 /// 执行 docker 并把 stdout/stderr 逐行实时转发到前端日志（大镜像复制/拉取期间用户能看到 docker 自身进度），
 /// 失败时返回末尾若干行作错误详情；长时间无任何输出时发心跳提示（含已耗时秒数），
 /// 覆盖代理黑洞等"进程未退出也无输出"的悬挂场景，避免界面看起来卡死
-async fn run_stream(app: &AppHandle, run_id: &str, args: &[&str]) -> Result<(), String> {
+async fn run_stream(app: &AppHandle, run_id: &str, args: &[&str], cancel: &Arc<AtomicBool>) -> Result<(), String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
+    if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
     let cmd = args.first().unwrap_or(&"");
     let mut child = docker_cmd().args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("docker {cmd} 启动失败: {e}"))?;
     let mut out = BufReader::new(child.stdout.take().ok_or("stdout 未捕获")?).lines();
@@ -115,23 +119,37 @@ async fn run_stream(app: &AppHandle, run_id: &str, args: &[&str]) -> Result<(), 
     let (mut out_open, mut err_open) = (true, true);
     let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
     let start = std::time::Instant::now();
+    let mut lines_since_cancel_check: u32 = 0;
     loop {
         if !out_open && !err_open { break; }
         tokio::select! {
             l = out.next_line(), if out_open => match l {
-                Ok(Some(s)) => { emit_line(app, run_id, &s, "stdout"); tail.push_back(s); if tail.len() > 60 { tail.pop_front(); } }
+                Ok(Some(s)) => {
+                    emit_line(app, run_id, &s, "stdout"); tail.push_back(s); if tail.len() > 60 { tail.pop_front(); }
+                    lines_since_cancel_check += 1;
+                    if lines_since_cancel_check >= 10 { lines_since_cancel_check = 0; if cancel.load(Ordering::Relaxed) { let _ = child.start_kill(); return Err("canceled".into()); } }
+                }
                 _ => out_open = false,
             },
             l = err.next_line(), if err_open => match l {
-                Ok(Some(s)) => { emit_line(app, run_id, &s, "stderr"); tail.push_back(s); if tail.len() > 60 { tail.pop_front(); } }
+                Ok(Some(s)) => {
+                    emit_line(app, run_id, &s, "stderr"); tail.push_back(s); if tail.len() > 60 { tail.pop_front(); }
+                    lines_since_cancel_check += 1;
+                    if lines_since_cancel_check >= 10 { lines_since_cancel_check = 0; if cancel.load(Ordering::Relaxed) { let _ = child.start_kill(); return Err("canceled".into()); } }
+                }
                 _ => err_open = false,
             },
             _ = tokio::time::sleep(std::time::Duration::from_secs(20)) => {
+                if cancel.load(Ordering::Relaxed) {
+                    let _ = child.start_kill();
+                    return Err("canceled".into());
+                }
                 emit_line(app, run_id, &format!("…… docker {cmd} 仍在进行：已耗时 {} 秒，近 20 秒无新输出（大镜像复制/网络较慢时属正常）", start.elapsed().as_secs()), "stderr");
             }
         }
     }
     let status = child.wait().await.map_err(|e| format!("等待 docker {cmd} 进程失败: {e}"))?;
+    if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
     if status.success() { return Ok(()); }
     Err(format!("docker {cmd} 失败: {}", tail.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n").trim()))
 }
@@ -146,12 +164,14 @@ fn brief_err(e: &str) -> String {
 
 /// 网络类 docker 操作的重试包装：CDN 流中断（stream CANCEL）/连接重置等瞬时故障短退避重试通常可恢复；
 /// 已推入本地 registry 的层按 digest 去重，重试等价于续传
-async fn run_ok_retry(app: &AppHandle, run_id: &str, args: &[&str], attempts: u32) -> Result<(), String> {
+async fn run_ok_retry(app: &AppHandle, run_id: &str, args: &[&str], cancel: &Arc<AtomicBool>, attempts: u32) -> Result<(), String> {
     let mut last = String::new();
     for i in 0..attempts {
-        match run_stream(app, run_id, args).await {
+        if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
+        match run_stream(app, run_id, args, cancel).await {
             Ok(()) => return Ok(()),
             Err(e) => {
+                if e == "canceled" { return Err(e); }
                 last = e;
                 if i + 1 < attempts {
                     let brief = brief_err(&last);
@@ -168,8 +188,8 @@ fn emit_line(app: &AppHandle, run_id: &str, line: &str, stream: &str) {
     let _ = app.emit("build-log", LogEvent { task_id: run_id.into(), project_id: run_id.into(), line: line.into(), stream: stream.into() });
 }
 
-async fn pull_image(app: &AppHandle, run_id: &str, image: &str) -> Result<(), String> {
-    run_ok_retry(app, run_id, &["pull", image], 3).await.map_err(|e| format!("pull {image} 失败: {e}"))
+async fn pull_image(app: &AppHandle, run_id: &str, image: &str, cancel: &Arc<AtomicBool>) -> Result<(), String> {
+    run_ok_retry(app, run_id, &["pull", image], cancel, 3).await.map_err(|e| format!("pull {image} 失败: {e}"))
 }
 
 /// 拆分 registry 引用为 (repo, tag)；仅在 tag 分隔符位于最后一个 '/' 之后时才拆分，无 tag 视为 latest
@@ -185,7 +205,7 @@ fn split_repo_tag(target: &str) -> (&str, &str) {
 /// HTTP/2 通路）会被持续 stream CANCEL，重试无效；而守护进程 pull/push 通路实测不受影响。
 /// 流程：CLI 本地 manifest inspect 枚举 linux 平台 → 逐平台 pull --platform → tag → push 进本地
 /// registry → 纯本地合成 manifest list，全程不再经 buildkit 直连上游
-async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &str) -> Result<(), String> {
+async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &str, cancel: &Arc<AtomicBool>) -> Result<(), String> {
     // 1. 枚举上游平台（docker manifest inspect 在 CLI 本地解析，不经 buildkit）
     let out = docker_cmd().args(["manifest", "inspect", orig]).output().await
         .map_err(|e| format!("docker manifest inspect 启动失败: {e}"))?;
@@ -212,7 +232,7 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
     if platforms.is_empty() {
         emit_line(app, run_id, &format!("回退：{orig} 为单平台镜像，守护进程直接中转"), "stdout");
         run_ok(&["tag", orig, target]).await?;
-        return run_ok_retry(app, run_id, &["push", target], 3).await
+        return run_ok_retry(app, run_id, &["push", target], cancel, 3).await
             .map_err(|e| format!("push {target} 失败: {e}"));
     }
 
@@ -220,12 +240,13 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
     let (repo, tag) = split_repo_tag(target);
     let mut refs: Vec<String> = Vec::with_capacity(platforms.len());
     for pf in &platforms {
+        if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
         let t = format!("{repo}:{tag}-{}", pf.replace('/', "-"));
         emit_line(app, run_id, &format!("回退中转 {orig} [{pf}] → {t}"), "stdout");
-        run_ok_retry(app, run_id, &["pull", "--platform", pf, orig], 3).await
+        run_ok_retry(app, run_id, &["pull", "--platform", pf, orig], cancel, 3).await
             .map_err(|e| format!("pull {orig} [{pf}] 失败: {e}"))?;
         run_ok(&["tag", orig, &t]).await?;
-        run_ok_retry(app, run_id, &["push", &t], 3).await
+        run_ok_retry(app, run_id, &["push", &t], cancel, 3).await
             .map_err(|e| format!("push {t} 失败: {e}"))?;
         refs.push(t);
     }
@@ -238,7 +259,7 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
 
     // 5. 恢复本机架构 tag：逐平台拉取会把 orig 覆盖成最后一个平台，
     //    重拉一次（层已缓存，秒级）保证后续 docker save 导出的是本机架构镜像
-    run_ok_retry(app, run_id, &["pull", orig], 2).await
+    run_ok_retry(app, run_id, &["pull", orig], cancel, 2).await
         .map_err(|e| format!("恢复本机架构 tag 失败: {e}"))
 }
 
@@ -247,10 +268,11 @@ async fn mirror_via_daemon(app: &AppHandle, run_id: &str, orig: &str, target: &s
 /// docker-driver builder，绕开 hr-builder 可能挂载的 mirror 配置且其容器内 localhost
 /// 目标不可达；显式 --builder default 在上下文非 default 时会报 context 切换错误），
 /// 直连通路被 CDN 持续 CANCEL 时回退守护进程逐平台中转
-pub async fn mirror_one_image(app: &AppHandle, run_id: &str, orig: &str, target: &str) -> Result<(), String> {
-    if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "-t", target, orig], 2).await {
+pub async fn mirror_one_image(app: &AppHandle, run_id: &str, orig: &str, target: &str, cancel: &Arc<AtomicBool>) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
+    if let Err(e) = run_ok_retry(app, run_id, &["buildx", "imagetools", "create", "-t", target, orig], cancel, 2).await {
         emit_line(app, run_id, &format!("buildkit 直连复制失败（{}），回退守护进程逐平台中转", brief_err(&e)), "stderr");
-        return mirror_via_daemon(app, run_id, orig, target).await
+        return mirror_via_daemon(app, run_id, orig, target, cancel).await
             .map_err(|e2| format!("复制多架构失败 {orig}: 直连[{}] 回退[{}]", brief_err(&e), brief_err(&e2)));
     }
     Ok(())
@@ -330,9 +352,11 @@ pub async fn repair_registries(
     run_id: &str,
     regs: &[RegistryEntry],
     dockerfiles: &[String],
+    cancel: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut rebuilt: Vec<&RegistryEntry> = Vec::new();
     for r in regs {
+        if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
         let name = format!("hr-offline-reg-{}", r.index);
         let exists = docker_cmd().args(["inspect", &name]).output().await
             .map(|o| o.status.success()).unwrap_or(false);
@@ -342,7 +366,7 @@ pub async fn repair_registries(
         }
         emit_line(app, run_id, &format!("registry 容器 {name} 缺失，在线重建（{} → :{}）...", r.host, r.port), "stdout");
         let bind = format!("{}:{}:5000", publish_bind(), r.port);
-        run_stream(app, run_id, &["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"]).await
+        run_stream(app, run_id, &["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"], cancel).await
             .map_err(|e| format!("mirror_rebuild_failed: {e}"))?;
         rebuilt.push(r);
     }
@@ -359,12 +383,13 @@ pub async fn repair_registries(
     for r in &rebuilt {
         let mut count = 0usize;
         for b in &bases {
+            if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
             if let Some((host, path)) = split_ref(b) {
                 if host != r.host { continue; }
                 count += 1;
                 let target = format!("localhost:{}/{}", r.port, path);
                 emit_line(app, run_id, &format!("在线回填 mirror {b} → {target}"), "stdout");
-                mirror_one_image(app, run_id, b, &target).await
+                mirror_one_image(app, run_id, b, &target, cancel).await
                     .map_err(|e| format!("mirror_refill_failed: {e}"))?;
             }
         }
@@ -402,6 +427,7 @@ pub async fn export_pack(
     dockerfiles: Vec<String>,
     dest_dir: &str,
     run_id: &str,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<PackManifest, String> {
     let dir = Path::new(dest_dir).join("offline-pack");
     if dir.exists() { let _ = fs::remove_dir_all(&dir); }
@@ -445,8 +471,9 @@ pub async fn export_pack(
     let mut all: Vec<&str> = TOOL_IMAGES.iter().map(|s| *s).collect();
     all.extend(bases.iter().map(|s| s.as_str()));
     for img in &all {
+        if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
         emit_line(app, run_id, &format!("Pulling {img}..."), "stdout");
-        pull_image(app, run_id, img).await?;
+        pull_image(app, run_id, img, cancel).await?;
     }
 
     // 4-6. 启动临时 registry → 多架构复制 → 导出卷数据；
@@ -465,18 +492,20 @@ pub async fn export_pack(
 
         // 5. 多架构复制：imagetools 把 manifest list + 全部平台 blobs 原样推入本地 registry
         for (orig, host, path) in &mirrorable {
+            if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
             let r = &regs[host];
             let target = format!("localhost:{}/{}", r.port, path);
             emit_line(app, run_id, &format!("复制多架构 {orig} → {target}"), "stdout");
-            mirror_one_image(app, run_id, orig, &target).await?;
+            mirror_one_image(app, run_id, orig, &target, cancel).await?;
         }
 
         // 6. 导出 registry 卷数据（cp 大目录无进度输出，心跳提示兜底）
         for r in regs.values() {
+            if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
             let name = format!("hr-export-reg-{}", r.index);
             let out = dir.join("registry-data").join(r.index.to_string());
             fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-            run_stream(app, run_id, &["cp", &format!("{name}:/var/lib/registry/."), out.to_str().ok_or("导出路径含非法字符")?]).await?;
+            run_stream(app, run_id, &["cp", &format!("{name}:/var/lib/registry/."), out.to_str().ok_or("导出路径含非法字符")?], cancel).await?;
         }
         Ok::<(), String>(())
     }.await;
@@ -488,7 +517,7 @@ pub async fn export_pack(
     let mut args: Vec<&str> = vec!["save", "-o", tar.to_str().ok_or("导出路径非法")?];
     args.extend(all.iter().copied());
     emit_line(app, run_id, "docker save → images.tar ...", "stdout");
-    run_stream(app, run_id, &args).await?;
+    run_stream(app, run_id, &args, cancel).await?;
 
     // 8. manifest.json
     let manifest = PackManifest {
@@ -505,7 +534,7 @@ pub async fn export_pack(
 }
 
 // ── 导入离线包（离线机）──
-pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &Path) -> Result<PackManifest, String> {
+pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &Path, cancel: &Arc<AtomicBool>) -> Result<PackManifest, String> {
     let dir = Path::new(pack_dir);
     let manifest_path = dir.join("manifest.json");
     if !dir.is_dir() || !manifest_path.is_file() {
@@ -522,11 +551,12 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &P
     let tar = dir.join("images.tar");
     if !tar.is_file() { return Err(format!("离线包缺少 images.tar: {}", tar.display())); }
     emit_line(app, run_id, "导入镜像库（docker load）...", "stdout");
-    run_stream(app, run_id, &["load", "-i", tar.to_str().ok_or("路径非法")?]).await?;
+    run_stream(app, run_id, &["load", "-i", tar.to_str().ok_or("路径非法")?], cancel).await?;
 
     // 2. 启动各上游对应的本地 registry 并灌入数据（清单端口被占用时自动顺延，后续配置按实际端口生成）
     let mut regs = manifest.registries.clone();
     for r in &mut regs {
+        if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
         let name = format!("hr-offline-reg-{}", r.index);
         run_ignore(&["rm", "-f", &name]).await;
         let effective = free_port(r.port);
@@ -539,7 +569,7 @@ pub async fn import_pack(app: &AppHandle, pack_dir: &str, run_id: &str, root: &P
         run_ok(&["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"]).await?;
         let data = dir.join("registry-data").join(r.index.to_string());
         if data.is_dir() {
-            run_stream(app, run_id, &["cp", &format!("{}/.", data.to_str().ok_or("路径非法")?), &format!("{name}:/var/lib/registry/")]).await?;
+            run_stream(app, run_id, &["cp", &format!("{}/.", data.to_str().ok_or("路径非法")?), &format!("{name}:/var/lib/registry/")], cancel).await?;
             run_ok(&["restart", &name]).await?;
         } else {
             emit_line(app, run_id, &format!("警告: 缺少数据目录 {}，该上游镜像无法镜像", data.display()), "stderr");
@@ -609,4 +639,135 @@ pub async fn bootstrap_offline_env(
         }
     }
     Ok("离线环境自举完成".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_from_simple() {
+        let df = "FROM mcr.microsoft.com/dotnet/aspnet:8.0\nRUN echo hi";
+        assert_eq!(parse_from_images(df), vec!["mcr.microsoft.com/dotnet/aspnet:8.0"]);
+    }
+
+    #[test]
+    fn parse_from_multiple_stages() {
+        let df = "\
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+COPY --from=build . .
+";
+        let imgs = parse_from_images(df);
+        assert_eq!(imgs.len(), 2);
+        assert!(imgs.contains(&"mcr.microsoft.com/dotnet/sdk:8.0".to_string()));
+        assert!(imgs.contains(&"mcr.microsoft.com/dotnet/aspnet:8.0".to_string()));
+    }
+
+    #[test]
+    fn parse_from_with_platform_flag() {
+        let df = "FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build";
+        let imgs = parse_from_images(df);
+        assert_eq!(imgs, vec!["mcr.microsoft.com/dotnet/sdk:8.0"]);
+    }
+
+    #[test]
+    fn parse_from_dockerhub_short_name() {
+        let df = "FROM alpine:3.18";
+        assert_eq!(parse_from_images(df), vec!["alpine:3.18"]);
+    }
+
+    #[test]
+    fn parse_from_skips_scratch() {
+        let df = "FROM scratch\nCOPY binary /";
+        assert!(parse_from_images(df).is_empty());
+    }
+
+    #[test]
+    fn parse_from_skips_comments_and_empty() {
+        let df = "# comment\n\nFROM ubuntu:22.04\n# another comment";
+        assert_eq!(parse_from_images(df), vec!["ubuntu:22.04"]);
+    }
+
+    #[test]
+    fn split_ref_dockerhub_short() {
+        let (host, path) = split_ref("aspnet:8.0").unwrap();
+        assert_eq!(host, "docker.io");
+        assert_eq!(path, "library/aspnet:8.0");
+    }
+
+    #[test]
+    fn split_ref_dockerhub_user_repo() {
+        let (host, path) = split_ref("myuser/myimage:latest").unwrap();
+        assert_eq!(host, "docker.io");
+        assert_eq!(path, "myuser/myimage:latest");
+    }
+
+    #[test]
+    fn split_ref_custom_registry() {
+        let (host, path) = split_ref("mcr.microsoft.com/dotnet/aspnet:8.0").unwrap();
+        assert_eq!(host, "mcr.microsoft.com");
+        assert_eq!(path, "dotnet/aspnet:8.0");
+    }
+
+    #[test]
+    fn split_ref_localhost_registry() {
+        let (host, path) = split_ref("localhost:5000/myimage:v1").unwrap();
+        assert_eq!(host, "localhost:5000");
+        assert_eq!(path, "myimage:v1");
+    }
+
+    #[test]
+    fn split_ref_digest_returns_none() {
+        assert!(split_ref("myimage@sha256:abcdef").is_none());
+    }
+
+    #[test]
+    fn split_ref_no_tag_defaults_path() {
+        let (host, path) = split_ref("alpine").unwrap();
+        assert_eq!(host, "docker.io");
+        assert_eq!(path, "library/alpine");
+    }
+
+    #[test]
+    fn split_repo_tag_with_tag() {
+        let (repo, tag) = split_repo_tag("localhost:5000/dotnet/aspnet:8.0");
+        assert_eq!(repo, "localhost:5000/dotnet/aspnet");
+        assert_eq!(tag, "8.0");
+    }
+
+    #[test]
+    fn split_repo_tag_without_tag() {
+        let (repo, tag) = split_repo_tag("localhost:5000/dotnet/aspnet");
+        assert_eq!(repo, "localhost:5000/dotnet/aspnet");
+        assert_eq!(tag, "latest");
+    }
+
+    #[test]
+    fn split_repo_tag_port_in_host_not_confused_with_tag() {
+        let (repo, tag) = split_repo_tag("localhost:5000/myimage");
+        assert_eq!(repo, "localhost:5000/myimage");
+        assert_eq!(tag, "latest");
+    }
+
+    #[test]
+    fn mirror_toml_format() {
+        let regs = vec![
+            RegistryEntry { host: "docker.io".into(), port: 5000, index: 0 },
+            RegistryEntry { host: "mcr.microsoft.com".into(), port: 5001, index: 1 },
+        ];
+        let toml = mirror_toml(&regs);
+        assert!(toml.contains("[registry.\"docker.io\"]"));
+        assert!(toml.contains("[registry.\"mcr.microsoft.com\"]"));
+        assert!(toml.contains("http = true"));
+        assert!(toml.contains("insecure = true"));
+        if cfg!(target_os = "linux") {
+            assert!(toml.contains("127.0.0.1:5000"));
+            assert!(toml.contains("127.0.0.1:5001"));
+        } else {
+            assert!(toml.contains("host.docker.internal:5000"));
+            assert!(toml.contains("host.docker.internal:5001"));
+        }
+    }
 }

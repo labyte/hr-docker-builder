@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Modal, Radio, Space, Tooltip, Typography } from 'antd';
-import { DownloadOutlined, UploadOutlined, GlobalOutlined, SettingOutlined } from '@ant-design/icons';
+import { DownloadOutlined, UploadOutlined, GlobalOutlined, SettingOutlined, LoadingOutlined } from '@ant-design/icons';
 
 // 立体感图标按钮：白底 + 描边 + 轻投影；图标统一黑白 + drop-shadow 微浮雕
 const btnStyle: React.CSSProperties = {
@@ -35,6 +35,7 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
   // 离线任务忙碌标记由 store 统一维护（queue-done / repairMirror 清理），跨组件互斥提示同源
   const offlineOp = useStore((s) => s.offlineOp);
   const setOfflineOp = useStore((s) => s.setOfflineOp);
+  const cancelOffline = useStore((s) => s.cancelOffline);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scope, setScope] = useState<'all' | 'current'>('all');
 
@@ -68,12 +69,21 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
       <Space size={16}>
         <div style={groupStyle}>
           <span style={{ color: '#8c8c8c', fontSize: 12, flexShrink: 0 }}>{t('toolbar.packGroup')}</span>
-          <Tooltip title={t('toolbar.packExportTip')}>
-            <Button size="small" icon={<UploadOutlined />} loading={offlineOp === 'export'}
-              onClick={() => { if (busyWarn()) return; setScopeOpen(true); }}>{t('toolbar.packExport')}</Button>
+          <Tooltip title={offlineOp === 'export' ? undefined : t('toolbar.packExportTip')}>
+            <Button size="small"
+              icon={offlineOp === 'export' ? <LoadingOutlined /> : <UploadOutlined />}
+              danger={offlineOp === 'export'}
+              onClick={offlineOp === 'export' ? () => void cancelOffline() : () => { if (busyWarn()) return; setScopeOpen(true); }}>
+              {offlineOp === 'export' ? t('toolbar.cancelPack') : t('toolbar.packExport')}
+            </Button>
           </Tooltip>
-          <Tooltip title={t('toolbar.packImportTip')}>
-            <Button size="small" icon={<DownloadOutlined />} loading={offlineOp === 'import'} onClick={() => void handleImport()}>{t('toolbar.packImport')}</Button>
+          <Tooltip title={offlineOp === 'import' ? undefined : t('toolbar.packImportTip')}>
+            <Button size="small"
+              icon={offlineOp === 'import' ? <LoadingOutlined /> : <DownloadOutlined />}
+              danger={offlineOp === 'import'}
+              onClick={offlineOp === 'import' ? () => void cancelOffline() : () => void handleImport()}>
+              {offlineOp === 'import' ? t('toolbar.cancelPack') : t('toolbar.packImport')}
+            </Button>
           </Tooltip>
         </div>
         {/* 下拉触发按钮不挂 Tooltip，避免悬浮提示遮挡菜单 */}

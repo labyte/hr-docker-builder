@@ -21,7 +21,8 @@ export default function BuildProgress() {
     return n;
   }, [statuses]);
 
-  if (!running && !summary) return null;
+  const kind = summary?.kind;
+  if (!running && !(summary && kind === 'build')) return null;
   const pct = totalTasks > 0 ? Math.min(100, Math.round((doneTasks / totalTasks) * 100)) : (summary ? 100 : 0);
   const barStatus: 'active' | 'success' | 'exception' = summary ? (summary.failed > 0 ? 'exception' : 'success') : 'active';
   return (

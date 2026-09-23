@@ -228,3 +228,85 @@ fn emit_line(app: &AppHandle, task: &BuildTask, line: &str, stream: &str) {
         stream: stream.into(),
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_program(image: &str, version: &str) -> Program {
+        Program {
+            id: "prog-1".into(),
+            name: "test".into(),
+            image: image.into(),
+            default_version: version.into(),
+            build_args: HashMap::new(),
+            ..Default::default()
+        }
+    }
+
+    fn make_task(program: Program, arch: &str, host_arch: &str, suffix: bool) -> BuildTask {
+        BuildTask {
+            task_id: format!("{}-{}", program.id, arch),
+            program,
+            arch: arch.into(),
+            host_arch: host_arch.into(),
+            nuget_packages_dir: String::new(),
+            project_context_dir: String::new(),
+            registry: String::new(),
+            builder_name: "hr-builder".into(),
+            image_arch_suffix: suffix,
+            outputs: Outputs::default(),
+            export_dir: "/tmp/export".into(),
+            log_dir: std::path::PathBuf::from("/tmp/logs"),
+        }
+    }
+
+    #[test]
+    fn image_tag_uses_version() {
+        let p = make_program("hr/app", "1.2.3");
+        assert_eq!(image_tag(&p), "1.2.3");
+    }
+
+    #[test]
+    fn image_tag_empty_version_defaults_latest() {
+        let p = make_program("hr/app", "");
+        assert_eq!(image_tag(&p), "latest");
+    }
+
+    #[test]
+    fn image_name_without_suffix() {
+        let t = make_task(make_program("hr/app", "1.0"), "amd64", "amd64", false);
+        assert_eq!(image_name(&t), "hr/app");
+    }
+
+    #[test]
+    fn image_name_with_suffix() {
+        let t = make_task(make_program("hr/app", "1.0"), "arm64", "amd64", true);
+        assert_eq!(image_name(&t), "hr/app-arm64");
+    }
+
+    #[test]
+    fn export_path_basic() {
+        let path = export_path("/tmp/export", "hr/app-amd64", "1.0");
+        assert_eq!(path, "/tmp/export/hr-app-amd64-1.0.tar");
+    }
+
+    #[test]
+    fn export_path_strips_trailing_slash() {
+        let path = export_path("/tmp/export/", "hr/app", "latest");
+        assert_eq!(path, "/tmp/export/hr-app-latest.tar");
+    }
+
+    #[test]
+    fn export_path_empty_dir_uses_dot() {
+        let path = export_path("", "myimage", "v1");
+        assert_eq!(path, "./myimage-v1.tar");
+    }
+
+    #[test]
+    fn export_path_namespace_slash_becomes_dash() {
+        let path = export_path("/out", "hr/sub/app", "2.0");
+        assert_eq!(path, "/out/hr-sub-app-2.0.tar");
+    }
+}
