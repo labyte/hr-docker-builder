@@ -8,8 +8,8 @@ export interface GlobalSettings {
   language: string;
   registry: string;
   builderName: string;
-  /** 导出文件名是否带架构标识（{镜像名}-{版本}-{架构}.tar）；镜像 tag 本身不含时间/架构 */
-  exportArchSuffix: boolean;
+  /** 镜像名是否追加架构标识：镜像引用 {镜像名}[-{架构}]:{版本}，导出文件 {镜像名}[-{架构}]-{版本}.tar */
+  imageArchSuffix: boolean;
   concurrency: number;
   failFast: boolean;
   /** 数据目录（projects/logs/exports），留空为系统默认 */

@@ -36,7 +36,7 @@ export default function SettingsModal({ open, onClose }: Props) {
     setActive('build');
     buildForm.setFieldsValue({ concurrency: global.concurrency, failFast: global.failFast, buildArgPresets: (global.buildArgPresets ?? []).join('\n') });
     registryForm.setFieldsValue({ registry: global.registry });
-    namingForm.setFieldsValue({ builderName: global.builderName, exportArchSuffix: global.exportArchSuffix });
+    namingForm.setFieldsValue({ builderName: global.builderName, imageArchSuffix: global.imageArchSuffix });
     dataForm.setFieldsValue({ dataDir: global.dataDir });
     nugetForm.setFieldsValue({ nugetPackagesDir: global.nugetPackagesDir });
   }, [open, global, buildForm, registryForm, namingForm, dataForm, nugetForm]);
@@ -120,10 +120,10 @@ export default function SettingsModal({ open, onClose }: Props) {
               <Form.Item name="builderName" label={t('settings.builderName')} extra={t('settings.builderNameDesc')}>
                 <Input placeholder="hr-builder" />
               </Form.Item>
-              <Form.Item name="exportArchSuffix" label={t('settings.exportArchSuffix')} valuePropName="checked" extra={t('settings.exportArchSuffixHint')}>
+              <Form.Item name="imageArchSuffix" label={t('settings.imageArchSuffix')} valuePropName="checked" extra={t('settings.imageArchSuffixHint')}>
                 <Switch />
               </Form.Item>
-              <SaveBtn primary onClick={() => void saveSection(namingForm, (v) => ({ builderName: v.builderName.trim() || 'hr-builder', exportArchSuffix: !!v.exportArchSuffix }))} />
+              <SaveBtn primary onClick={() => void saveSection(namingForm, (v) => ({ builderName: v.builderName.trim() || 'hr-builder', imageArchSuffix: !!v.imageArchSuffix }))} />
             </Form>
           )}
 

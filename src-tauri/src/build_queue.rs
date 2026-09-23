@@ -62,7 +62,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                 project_context_dir: project.context_dir.clone(),
                 registry: global.registry.clone(),
                 builder_name: global.builder_name.clone(),
-                export_arch_suffix: global.export_arch_suffix,
+                image_arch_suffix: global.image_arch_suffix,
                 outputs: req.outputs.clone(),
                 export_dir: export_dir.clone(),
                 log_dir: log_dir.clone(),
@@ -107,8 +107,8 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                 Ok(tag) => {
                     counts.success.fetch_add(1, Ordering::Relaxed);
                     let ef = if task.outputs.export_file {
-                        // 文件名与实际落盘一致：版本（按设置可选带架构标识）
-                        let f = docker_exec::export_path(&task.export_dir, &task.program.image, &docker_exec::export_label(&task));
+                        // 文件名与实际落盘一致：{镜像名[-架构]}-{版本}.tar
+                        let f = docker_exec::export_file_path(&task);
                         export_files.lock().unwrap().push(f.clone());
                         Some(f)
                     } else { None };

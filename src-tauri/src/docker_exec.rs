@@ -22,17 +22,18 @@ pub async fn execute(
         return Err("registry_not_configured".into());
     }
 
-    // 镜像 tag 直接取程序设置的默认版本（不带时间/架构标识）；双架构产物靠导出文件名区分
+    // 镜像名按设置可选追加架构标识（-amd64/-arm64），tag（版本）始终取程序设置的默认版本
+    let name = image_name(task);
     let tag = image_tag(&task.program);
-    let local_tag = format!("{}:{}", task.program.image, tag);
+    let local_tag = format!("{name}:{tag}");
     let registry_tag = if push {
-        Some(format!("{}/{}:{}", task.registry.trim_end_matches('/'), task.program.image, tag))
+        Some(format!("{}/{}:{}", task.registry.trim_end_matches('/'), name, tag))
     } else {
         None
     };
 
     let tar_path = if export_file {
-        Some(export_path(&task.export_dir, &task.program.image, &export_label(task)))
+        Some(export_file_path(task))
     } else {
         None
     };
@@ -143,11 +144,15 @@ fn image_tag(program: &Program) -> String {
     if v.is_empty() { "latest".to_string() } else { v.to_string() }
 }
 
-/// 导出文件名标识：版本，按全局设置可选追加架构后缀——
-/// 镜像 tag 不含架构，双架构构建靠架构标识区分两份 tar；关闭时后写覆盖先写
-pub fn export_label(task: &BuildTask) -> String {
-    let v = image_tag(&task.program);
-    if task.export_arch_suffix { format!("{v}-{}", task.arch) } else { v }
+/// 镜像名：按全局设置可选追加架构标识（{镜像名}[-{架构}]）——
+/// 双架构构建靠镜像名区分两份 tag/tar；关闭时同名后写覆盖先写
+fn image_name(task: &BuildTask) -> String {
+    if task.image_arch_suffix { format!("{}-{}", task.program.image, task.arch) } else { task.program.image.clone() }
+}
+
+/// 导出文件全路径：{镜像名[-架构]}-{版本}.tar，与实际落盘一致
+pub fn export_file_path(task: &BuildTask) -> String {
+    export_path(&task.export_dir, &image_name(task), &image_tag(&task.program))
 }
 
 pub fn export_path(export_dir: &str, image: &str, tag: &str) -> String {
