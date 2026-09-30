@@ -196,7 +196,7 @@ body,
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 10px 12px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
   flex-wrap: wrap;

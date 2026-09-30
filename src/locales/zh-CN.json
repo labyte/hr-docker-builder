@@ -115,9 +115,10 @@
     "copied": "已复制程序",
     "more": "更多",
     "selected": "已选 {{count}}/{{total}}",
-    "sortName": "按名称",
-    "sortEnabled": "按已选",
-    "sortLastBuild": "按构建时间"
+    "sortName": "名称",
+    "sortEnabled": "勾选",
+    "sortLastBuild": "构建时间",
+    "sort": "排序"
   },
   "status": {
     "running": "构建中",
@@ -125,6 +126,11 @@
     "failed": "失败",
     "canceled": "已取消",
     "skipped": "已跳过"
+  },
+  "step": {
+    "exporting": "导出中",
+    "loading": "加载中",
+    "pushing": "推送中"
   },
   "form": {
     "newTitle": "添加程序",

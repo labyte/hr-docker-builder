@@ -4,12 +4,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use regex::Regex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tauri::{AppHandle, Emitter};
 
 use crate::shell::docker_cmd;
 
-use crate::types::{BuildTask, LogEvent, Outputs, Program};
+use crate::types::{BuildTask, LogEvent, Outputs, Program, StatusEvent};
 
 pub async fn execute(
     app: &AppHandle,
@@ -109,28 +110,28 @@ pub async fn execute(
     } else if use_docker_driver {
         emit_line(app, task, "[本机优先] 同架构构建走 default builder：FROM 先查本机镜像库，缺失才联网拉取", "stdout");
     }
-    step(app, task, &log_file, cancel, &args, "build_failed").await?;
+    step(app, task, &log_file, cancel, &args, "build_failed", "").await?;
 
     if use_docker_driver {
         // docker 驱动：产物已在本机镜像库（load_local 无需额外步骤）；导出用 save、推送用 push
         if let Some(tar) = &tar_path {
-            step(app, task, &log_file, cancel, &["save".into(), "-o".into(), tar.clone(), local_tag.clone()], "docker_save_failed").await?;
+            step(app, task, &log_file, cancel, &["save".into(), "-o".into(), tar.clone(), local_tag.clone()], "docker_save_failed", "step.exporting").await?;
         }
         if push {
             let rt = registry_tag.clone().unwrap();
-            step(app, task, &log_file, cancel, &["push".into(), rt], "docker_push_failed").await?;
+            step(app, task, &log_file, cancel, &["push".into(), rt], "docker_push_failed", "step.pushing").await?;
         }
     } else {
         // 2) need load after export
         let need_load = tar_path.is_some() && (load_local || (push && !push_native));
         if need_load {
             let tar = tar_path.clone().unwrap();
-            step(app, task, &log_file, cancel, &["load".into(), "-i".into(), tar], "docker_load_failed").await?;
+            step(app, task, &log_file, cancel, &["load".into(), "-i".into(), tar], "docker_load_failed", "step.loading").await?;
         }
         // 3) push after load
         if push && !push_native {
             let rt = registry_tag.clone().unwrap();
-            step(app, task, &log_file, cancel, &["push".into(), rt], "docker_push_failed").await?;
+            step(app, task, &log_file, cancel, &["push".into(), rt], "docker_push_failed", "step.pushing").await?;
         }
     }
 
@@ -141,9 +142,10 @@ pub async fn execute(
 /// - 启动前检查取消——已取消的队列不再继续 save/push/load（否则取消后仍可能完成推送）
 /// - 退出码非 0 时先判是否取消所致，避免把用户取消误报为 docker_*_failed
 /// - kill CLI 即断开 buildx/buildkit 会话，daemon 侧构建随之中止
-async fn step(app: &AppHandle, task: &BuildTask, log_file: &std::path::Path, cancel: &Arc<AtomicBool>, args: &[String], err_key: &str) -> Result<(), String> {
+/// - phase 为 build 步骤标签（空串表示由 buildx [N/M] 解析），非空则为后续阶段 i18n key
+async fn step(app: &AppHandle, task: &BuildTask, log_file: &std::path::Path, cancel: &Arc<AtomicBool>, args: &[String], err_key: &str, phase: &str) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
-    let code = stream_cmd(app, task, log_file, cancel, args).await?;
+    let code = stream_cmd(app, task, log_file, cancel, args, phase).await?;
     if code != 0 {
         if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
         return Err(format!("{err_key}(exit {code})"));
@@ -177,7 +179,7 @@ pub fn export_path(export_dir: &str, image: &str, tag: &str) -> String {
 
 async fn stream_cmd(
     app: &AppHandle, task: &BuildTask, log_file: &std::path::Path,
-    cancel: &Arc<AtomicBool>, args: &[String],
+    cancel: &Arc<AtomicBool>, args: &[String], phase: &str,
 ) -> Result<i32, String> {
     let mut cmd = docker_cmd();
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
@@ -196,16 +198,49 @@ async fn stream_cmd(
         std::fs::OpenOptions::new().create(true).append(true).open(log_file).map_err(|e| e.to_string())?,
     ));
 
+    let step_re = Regex::new(r"\[(\d+)/(\d+)\]").unwrap();
+    let last_step = Arc::new(Mutex::new(String::new()));
+
+    // 后续阶段（save/load/push）立即发送步骤标签；build 阶段由 buildx [N/M] 解析驱动
+    if !phase.is_empty() {
+        let _ = app.emit("build-status", StatusEvent {
+            program_id: task.program.id.clone(),
+            arch: task.arch.clone(),
+            status: "running".into(),
+            message: None, tag: None, export_file: None,
+            step: Some(phase.to_string()),
+        });
+    }
+
     let (app1, app2) = (app.clone(), app.clone());
     let (f1, f2) = (file.clone(), file.clone());
     let (tid1, tid2) = (task.task_id.clone(), task.task_id.clone());
     let (pid1, pid2) = (task.program.id.clone(), task.program.id.clone());
+    let (step_re1, step_re2) = (step_re.clone(), step_re.clone());
+    let (last_step1, last_step2) = (last_step.clone(), last_step.clone());
+    let (prog_id1, prog_id2) = (task.program.id.clone(), task.program.id.clone());
+    let (arch1, arch2) = (task.arch.clone(), task.arch.clone());
+    let is_build = phase.is_empty();
 
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = app1.emit("build-log", LogEvent { task_id: tid1.clone(), project_id: pid1.clone(), line: line.clone(), stream: "stdout".into() });
             if let Ok(mut f) = f1.lock() { let _ = writeln!(f, "{line}"); }
+            if is_build {
+                if let Some(caps) = step_re1.captures(&line) {
+                    let step_str = format!("[{}/{}]", &caps[1], &caps[2]);
+                    let mut last = last_step1.lock().unwrap();
+                    if *last != step_str {
+                        *last = step_str.clone();
+                        let _ = app1.emit("build-status", StatusEvent {
+                            program_id: prog_id1.clone(), arch: arch1.clone(),
+                            status: "running".into(), message: None, tag: None, export_file: None,
+                            step: Some(step_str),
+                        });
+                    }
+                }
+            }
         }
     });
     tokio::spawn(async move {
@@ -213,6 +248,20 @@ async fn stream_cmd(
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = app2.emit("build-log", LogEvent { task_id: tid2.clone(), project_id: pid2.clone(), line: line.clone(), stream: "stderr".into() });
             if let Ok(mut f) = f2.lock() { let _ = writeln!(f, "[stderr] {line}"); }
+            if is_build {
+                if let Some(caps) = step_re2.captures(&line) {
+                    let step_str = format!("[{}/{}]", &caps[1], &caps[2]);
+                    let mut last = last_step2.lock().unwrap();
+                    if *last != step_str {
+                        *last = step_str.clone();
+                        let _ = app2.emit("build-status", StatusEvent {
+                            program_id: prog_id2.clone(), arch: arch2.clone(),
+                            status: "running".into(), message: None, tag: None, export_file: None,
+                            step: Some(step_str),
+                        });
+                    }
+                }
+            }
         }
     });
 

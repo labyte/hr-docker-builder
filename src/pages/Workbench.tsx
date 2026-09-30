@@ -85,10 +85,10 @@ export default function Workbench() {
           title="拖动调整 / 双击复位"
         ><span className="vsplitter-grip" /></div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <Toolbar onAddProgram={() => { setEditing(null); setFormOpen(true); }} />
+          <Toolbar />
           <div className="split" ref={splitRef}>
             <div className="left" style={{ height: topPx ?? '55%' }}>
-              <ProgramTable onEdit={(p) => { setEditing(p); setFormOpen(true); }} />
+              <ProgramTable onEdit={(p) => { setEditing(p); setFormOpen(true); }} onAddProgram={() => { setEditing(null); setFormOpen(true); }} />
             </div>
             <div className="splitter"
               onPointerDown={e => { e.preventDefault(); draggingRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); }}

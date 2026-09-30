@@ -111,6 +111,7 @@ export interface StatusEvent {
   message?: string | null;
   tag?: string | null;
   exportFile?: string | null;
+  step?: string | null;
 }
 
 export interface QueueDone {

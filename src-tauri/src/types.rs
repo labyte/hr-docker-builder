@@ -198,6 +198,9 @@ pub struct StatusEvent {
     pub tag: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub export_file: Option<String>,
+    /// 构建子步骤：buildx 步骤为 "N/M"，后续阶段为 i18n key（step.exporting / step.loading / step.pushing）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

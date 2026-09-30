@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
-import { App, Button, Space, Tooltip } from 'antd';
-import { FolderOpenFilled, PlusOutlined, ThunderboltFilled } from '@ant-design/icons';
+import { App, Button, Tooltip } from 'antd';
+import { FolderOpenFilled, ThunderboltFilled } from '@ant-design/icons';
 import { useStore } from '../store';
 import { errText } from '../utils';
 import { api } from '../api';
@@ -41,14 +41,11 @@ function DirLink({ label, color, path, tip }: { label: string; color: string; pa
   );
 }
 
-interface Props { onAddProgram: () => void }
-
-export default function Toolbar({ onAddProgram }: Props) {
+export default function Toolbar() {
   const { t, i18n } = useTranslation();
   const { message } = App.useApp();
   const selectedId = useStore((s) => s.selectedProjectId);
   const selectedProject = useStore((s) => s.config.projects.find(p => p.id === s.selectedProjectId));
-  // 架构与产物去向为项目属性：工具条只读展示，编辑入口在项目设置（防误操作）
   const arch = useStore((s) => s.arch);
   const outputs = useStore((s) => s.outputs);
   const running = useStore((s) => s.running);
@@ -97,18 +94,18 @@ export default function Toolbar({ onAddProgram }: Props) {
         </Tooltip>
       ))}
 
-      {/* 添加程序：靠左、圆形纯图标按钮 */}
-      <Tooltip title={t('table.add')}>
-        <Button type="primary" shape="circle" size="small" icon={<PlusOutlined />} disabled={running || !selectedId} onClick={onAddProgram} />
-      </Tooltip>
-
-      <Space className="toolbar-actions">
+      <div style={{ marginLeft: 'auto' }}>
         {!running ? (
-          <Button type="primary" icon={<ThunderboltFilled />} disabled={!selectedId} onClick={async () => { const err = await startBuild(); if (err) message.error(errText(err)); }}>{t('toolbar.build')}</Button>
+          <Button type="primary" size="small" icon={<ThunderboltFilled />} disabled={!selectedId}
+            onClick={async () => { const err = await startBuild(); if (err) message.error(errText(err)); }}>
+            {t('toolbar.build')}
+          </Button>
         ) : (
-          <Button danger onClick={async () => { await cancelBuild(); }}>{t('toolbar.cancel')}</Button>
+          <Button danger size="small" onClick={async () => { await cancelBuild(); }}>
+            {t('toolbar.cancel')}
+          </Button>
         )}
-      </Space>
+      </div>
     </div>
   );
 }

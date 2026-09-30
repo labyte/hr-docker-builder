@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Empty, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { CopyFilled, DeleteFilled, EditFilled, EllipsisOutlined, WarningFilled } from '@ant-design/icons';
+import { CopyFilled, DeleteFilled, EditFilled, EllipsisOutlined, PlusOutlined, WarningFilled } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../store';
 import { errText } from '../utils';
@@ -14,16 +14,20 @@ type SortMode = 'name' | 'enabled' | 'lastBuild';
 function StatusTags({ ev }: { ev?: Record<string, StatusEvent> }) {
   const { t } = useTranslation();
   if (!ev) return <Typography.Text type="secondary">—</Typography.Text>;
-  return <Space size={4} wrap>{Object.values(ev).map(s => (
-    <Tooltip key={s.arch} title={s.message ? s.message : undefined}>
-      <Tag color={STATUS_COLOR[s.status] ?? 'default'}>{s.arch} · {t(`status.${s.status}`)}</Tag>
-    </Tooltip>
-  ))}</Space>;
+  return <Space size={4} wrap>{Object.values(ev).map(s => {
+    const stepLabel = s.step ? ` ${t(s.step, s.step)}` : '';
+    const tooltip = [s.message, s.step ? t(s.step, s.step) : null].filter(Boolean).join(' · ') || undefined;
+    return (
+      <Tooltip key={s.arch} title={tooltip}>
+        <Tag color={STATUS_COLOR[s.status] ?? 'default'}>{s.arch} · {t(`status.${s.status}`)}{stepLabel}</Tag>
+      </Tooltip>
+    );
+  })}</Space>;
 }
 
-interface Props { onEdit: (p: Program) => void }
+interface Props { onEdit: (p: Program) => void; onAddProgram: () => void }
 
-export default function ProgramTable({ onEdit }: Props) {
+export default function ProgramTable({ onEdit, onAddProgram }: Props) {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const selectedProjectId = useStore(s => s.selectedProjectId);
@@ -153,28 +157,35 @@ export default function ProgramTable({ onEdit }: Props) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      {totalCount > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px 0', flexShrink: 0 }}>
-          <Segmented size="small" value={sortMode} onChange={v => setSortMode(v as SortMode)}
-            options={[
-              { label: t('table.sortName'), value: 'name' },
-              { label: t('table.sortEnabled'), value: 'enabled' },
-              { label: t('table.sortLastBuild'), value: 'lastBuild' },
-            ]}
-          />
-          {selectedCount > 0 && (
-            <>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('table.selected', { count: selectedCount, total: totalCount })}
-              </Typography.Text>
-              <Button size="small" danger type="text" icon={<DeleteFilled />} onClick={handleBatchDelete}
-                disabled={running} style={{ fontSize: 12 }}>
-                {t('table.delete')}
-              </Button>
-            </>
-          )}
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px 0', flexShrink: 0 }}>
+        {selectedCount > 0 && (
+          <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
+            {t('table.selected', { count: selectedCount, total: totalCount })}
+          </Typography.Text>
+        )}
+        {totalCount > 0 && (
+          <>
+            <span style={{ fontSize: 12, color: '#888', flexShrink: 0 }}>{t('table.sort')}</span>
+            <Segmented size="small" value={sortMode} onChange={v => setSortMode(v as SortMode)}
+              options={[
+                { label: t('table.sortName'), value: 'name' },
+                { label: t('table.sortEnabled'), value: 'enabled' },
+                { label: t('table.sortLastBuild'), value: 'lastBuild' },
+              ]}
+            />
+          </>
+        )}
+        <Tooltip title={t('table.add')}>
+          <Button type="primary" shape="circle" size="small" icon={<PlusOutlined />}
+            disabled={running || !selectedProjectId} onClick={onAddProgram} />
+        </Tooltip>
+        {selectedCount > 0 && (
+          <Button size="small" danger type="text" icon={<DeleteFilled />} onClick={handleBatchDelete}
+            disabled={running} style={{ fontSize: 12 }}>
+            {t('table.delete')}
+          </Button>
+        )}
+      </div>
       <div style={{ flex:1, overflow:'auto', padding:'12px' }}>
         <Table<Program>
           size="small" rowKey="id" columns={columns} dataSource={displayPrograms} pagination={false} tableLayout="fixed"

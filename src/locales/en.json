@@ -115,9 +115,10 @@
     "copied": "Program copied",
     "more": "More",
     "selected": "{{count}}/{{total}} selected",
-    "sortName": "By name",
-    "sortEnabled": "By selected",
-    "sortLastBuild": "By last build"
+    "sortName": "Name",
+    "sortEnabled": "Checked",
+    "sortLastBuild": "Last build",
+    "sort": "Sort"
   },
   "status": {
     "running": "building",
@@ -125,6 +126,11 @@
     "failed": "failed",
     "canceled": "canceled",
     "skipped": "skipped"
+  },
+  "step": {
+    "exporting": "exporting",
+    "loading": "loading",
+    "pushing": "pushing"
   },
   "form": {
     "newTitle": "Add program",

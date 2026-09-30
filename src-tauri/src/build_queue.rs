@@ -87,7 +87,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
         let export_files = export_files.clone();
         let any_fail = any_fail.clone();
         set.spawn(async move {
-            let emit = |status: &str, message: Option<String>, tag: Option<String>, export_file: Option<String>| {
+            let emit = |status: &str, message: Option<String>, tag: Option<String>, export_file: Option<String>, step: Option<String>| {
                 let _ = app.emit("build-status", StatusEvent {
                     program_id: task.program.id.clone(),
                     arch: task.arch.clone(),
@@ -95,16 +95,17 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                     message,
                     tag,
                     export_file,
+                    step,
                 });
             };
-            if cancel.load(Ordering::Relaxed) { counts.skipped.fetch_add(1, Ordering::Relaxed); emit("skipped", None, None, None); return; }
-            if fail_fast && any_fail.load(Ordering::Relaxed) { counts.skipped.fetch_add(1, Ordering::Relaxed); emit("skipped", Some("failFast".into()), None, None); return; }
+            if cancel.load(Ordering::Relaxed) { counts.skipped.fetch_add(1, Ordering::Relaxed); emit("skipped", None, None, None, None); return; }
+            if fail_fast && any_fail.load(Ordering::Relaxed) { counts.skipped.fetch_add(1, Ordering::Relaxed); emit("skipped", Some("failFast".into()), None, None, None); return; }
             let _permit = match sem.acquire().await {
                 Ok(p) => p,
-                Err(_) => { counts.canceled.fetch_add(1, Ordering::Relaxed); emit("canceled", None, None, None); return; }
+                Err(_) => { counts.canceled.fetch_add(1, Ordering::Relaxed); emit("canceled", None, None, None, None); return; }
             };
-            if cancel.load(Ordering::Relaxed) { counts.skipped.fetch_add(1, Ordering::Relaxed); emit("skipped", None, None, None); return; }
-            emit("running", None, None, None);
+            if cancel.load(Ordering::Relaxed) { counts.skipped.fetch_add(1, Ordering::Relaxed); emit("skipped", None, None, None, None); return; }
+            emit("running", None, None, None, None);
             match docker_exec::execute(&app, &task, &cancel).await {
                 Ok(tag) => {
                     counts.success.fetch_add(1, Ordering::Relaxed);
@@ -114,12 +115,12 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                         export_files.lock().unwrap().push(f.clone());
                         Some(f)
                     } else { None };
-                    emit("success", None, Some(tag.clone()), ef);
+                    emit("success", None, Some(tag.clone()), ef, None);
                     save_history(&app, &task, &tag, true);
                 }
                 Err(msg) => {
-                    if msg == "canceled" { counts.canceled.fetch_add(1, Ordering::Relaxed); emit("canceled", None, None, None); }
-                    else { any_fail.store(true, Ordering::Relaxed); counts.failed.fetch_add(1, Ordering::Relaxed); emit("failed", Some(msg.clone()), None, None); save_history(&app, &task, "", false); }
+                    if msg == "canceled" { counts.canceled.fetch_add(1, Ordering::Relaxed); emit("canceled", None, None, None, None); }
+                    else { any_fail.store(true, Ordering::Relaxed); counts.failed.fetch_add(1, Ordering::Relaxed); emit("failed", Some(msg.clone()), None, None, None); save_history(&app, &task, "", false); }
                 }
             }
         });
