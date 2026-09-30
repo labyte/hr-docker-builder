@@ -84,6 +84,30 @@ pub async fn ensure_builder(builder: &str, config: Option<&str>) -> Result<EnvIn
     Ok(probe(builder).await)
 }
 
+/// 检测当前默认 builder 的驱动类型（docker / docker-container）
+pub async fn detect_default_driver() -> String {
+    match out(&["buildx", "inspect"]).await {
+        Ok(text) => text
+            .lines()
+            .find_map(|l| l.strip_prefix("Driver/"))
+            .or_else(|| text.lines().find_map(|l| l.trim().strip_prefix("Driver:")))
+            .map(|v| v.trim().to_lowercase())
+            .unwrap_or_else(|| "docker".into()),
+        Err(_) => "docker".into(),
+    }
+}
+
+/// 重启后内核 binfmt_misc 注册丢失，导致 builder 只报告原生架构。
+/// 若 builder 存在但缺少跨架构平台，尝试用本地 tonistiigi/binfmt 镜像重新注册——
+/// 离线包已导入该镜像，无需联网；注册失败（权限不足/镜像不存在）静默忽略。
+pub async fn ensure_qemu_registered(env: &EnvInfo) {
+    if !env.builder_ok { return; }
+    let has_amd64 = env.builder_platforms.iter().any(|p| p.contains("amd64"));
+    let has_arm64 = env.builder_platforms.iter().any(|p| p.contains("arm64"));
+    if has_amd64 && has_arm64 { return; }
+    let _ = out(&["run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "all"]).await;
+}
+
 pub async fn install_qemu() -> Result<String, String> {
     out(&["run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "all"]).await
 }

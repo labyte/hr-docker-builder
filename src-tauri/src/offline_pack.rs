@@ -296,6 +296,21 @@ pub async fn offline_registry_running() -> bool {
     !running_registries().await.is_empty()
 }
 
+/// 重启后自动拉起已导入的 offline registry 容器（容器已 `--restart unless-stopped` 创建，
+/// Docker 正常自启时已自动恢复；仅在 Docker 未设为开机自启或非正常关机后才需手动拉起）
+pub async fn auto_start_registries(root: &Path) {
+    let Some(regs) = load_registries(root) else { return };
+    if regs.is_empty() { return }
+    let running = running_registries().await;
+    for r in &regs {
+        let name = format!("hr-offline-reg-{}", r.index);
+        if running.iter().any(|c| c == &name) { continue }
+        let exists = docker_cmd().args(["inspect", &name]).output().await
+            .map(|o| o.status.success()).unwrap_or(false);
+        if exists { let _ = docker_cmd().args(["start", &name]).output().await; }
+    }
+}
+
 /// builder 的 buildkit 容器是否挂载了 mirror 配置（创建时带 --config buildkitd.toml 的代理判据）
 pub async fn builder_has_mirror_config(builder: &str) -> bool {
     let name = format!("buildx_buildkit_{}0", builder);

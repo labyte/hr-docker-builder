@@ -85,7 +85,16 @@ pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<Env
         let cfg = state.config.lock().unwrap();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
     };
+    // 重启后自动恢复离线环境：拉起已导入的 registry 容器（Docker 未开机自启/非正常关机时可能未恢复）
+    offline_pack::auto_start_registries(&root).await;
     let mut env = env_checker::probe(&builder).await;
+    // 重启后 binfmt_misc 注册丢失 → 自动重新注册 QEMU（离线包已导入 binfmt 镜像，无需联网）
+    let has_cross = env.builder_platforms.iter().any(|p| p.contains("amd64"))
+        && env.builder_platforms.iter().any(|p| p.contains("arm64"));
+    if env.builder_ok && !has_cross {
+        env_checker::ensure_qemu_registered(&env).await;
+        env = env_checker::probe(&builder).await;
+    }
     env.mirror = probe_mirror(&root, &builder).await;
     Ok(env)
 }

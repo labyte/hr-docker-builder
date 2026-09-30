@@ -48,6 +48,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
     let _ = std::fs::create_dir_all(&log_dir);
 
     let host_arch = env_checker::host_arch().await;
+    let default_driver = env_checker::detect_default_driver().await;
     let mut tasks: Vec<BuildTask> = Vec::new();
     for pid in &req.program_ids {
         let Some(program) = project.programs.iter().find(|p| &p.id == pid) else { continue };
@@ -62,6 +63,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                 project_context_dir: project.context_dir.clone(),
                 registry: global.registry.clone(),
                 builder_name: global.builder_name.clone(),
+                default_driver: default_driver.clone(),
                 image_arch_suffix: global.image_arch_suffix,
                 outputs: req.outputs.clone(),
                 export_dir: export_dir.clone(),

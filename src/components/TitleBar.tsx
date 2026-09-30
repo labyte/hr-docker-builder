@@ -89,7 +89,6 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
   const env = useStore((s) => s.env);
   const envBusy = useStore((s) => s.envBusy);
   const fixBuilder = useStore((s) => s.fixBuilder);
-  const installQemu = useStore((s) => s.installQemu);
 
   const renderEnvStatus = () => {
     if (!env) {
@@ -113,15 +112,7 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
         />
       );
     }
-    const missingArch = !env.builderPlatforms.some(p => p.includes('arm64')) || !env.builderPlatforms.some(p => p.includes('amd64'));
-    const actions = [];
-    if (missingArch) {
-      actions.push(
-        <Button key="qemu" size="small" type="link" loading={envBusy} onClick={async () => {
-          try { await installQemu(); message.success(t('env.qemuOk')); } catch (e) { message.error(errText(e)); }
-        }}>{t('env.installQemu')}</Button>
-      );
-    }
+    const actions: React.ReactNode[] = [];
     actions.push(<EnvInfoButton key="env" env={env} />);
     return (
       <EnvPill color="success" icon={<CheckCircleFilled />} label="Docker ✓" refresh

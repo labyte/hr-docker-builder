@@ -168,6 +168,8 @@ pub struct BuildTask {
     pub project_context_dir: String,
     pub registry: String,
     pub builder_name: String,
+    /// 默认 builder 的驱动类型（docker / docker-container）；用于同架构构建时判断是否需要显式 --output/--load
+    pub default_driver: String,
     pub image_arch_suffix: bool,
     pub outputs: Outputs,
     pub export_dir: String,

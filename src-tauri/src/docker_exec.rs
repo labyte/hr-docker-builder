@@ -38,11 +38,15 @@ pub async fn execute(
         None
     };
 
-    // 同架构 → 当前上下文的默认 docker-driver builder：FROM 优先解析本机 docker 镜像库，
+    // 同架构 → 当前上下文的默认 builder：FROM 优先解析本机 docker 镜像库，
     // 离线环境下本机有基础镜像即可构建；缺省才走外网。
     // 交叉架构 → 仍用 docker-container（hr-builder）：需要 QEMU/独立缓存，
     // 该驱动不共享本机镜像库，离线机请先导入离线包并保证 builder 就绪。
     let use_default = !task.host_arch.is_empty() && task.arch == task.host_arch;
+    // 仅当默认 builder 实际是 docker 驱动时才能走快捷路径（产物自动进本机镜像库）；
+    // 若默认 builder 是 docker-container 驱动（如 Docker Desktop 的 desktop-linux 上下文），
+    // 必须显式传 --output/--load/--push，否则构建结果只留在 build cache
+    let use_docker_driver = use_default && task.default_driver == "docker";
 
     let mut args: Vec<String> = vec![
         "buildx".into(), "build".into(),
@@ -59,8 +63,8 @@ pub async fn execute(
     }
 
     // tag 策略
-    let push_native = !use_default && push && tar_path.is_none() && !load_local;
-    match (&registry_tag, use_default) {
+    let push_native = !use_docker_driver && push && tar_path.is_none() && !load_local;
+    match (&registry_tag, use_docker_driver) {
         (Some(rt), true) => { args.extend(["-t".into(), local_tag.clone(), "-t".into(), rt.clone()]); }
         (Some(rt), false) if push_native => { args.extend(["-t".into(), rt.clone()]); }
         (Some(rt), false) => { args.extend(["-t".into(), local_tag.clone(), "-t".into(), rt.clone()]); }
@@ -77,9 +81,10 @@ pub async fn execute(
     if let Some(tar) = &tar_path {
         if let Some(parent) = std::path::Path::new(tar).parent() { let _ = std::fs::create_dir_all(parent); }
     }
-    if !use_default {
-        // default 驱动不支持 --output/--push（构建结果自动进本机镜像库），
-        // 导出与推送在构建完成后用 docker save / docker push 单独执行
+    if !use_docker_driver {
+        // docker 驱动：构建结果自动进本机镜像库，不需要 --output/--load/--push；
+        // docker-container 驱动（含交叉架构 hr-builder 和同架构但默认 builder 非 docker 的情况）：
+        // 必须显式指定输出方式，否则构建结果只留在 build cache
         if let Some(tar) = &tar_path {
             args.extend(["--output".into(), format!("type=docker,dest={tar}")]);
         } else if load_local {
@@ -99,13 +104,15 @@ pub async fn execute(
     let log_file = task.log_dir.join(format!("{}-{}.log", task.task_id, task.arch));
 
     // 1) build
-    if use_default {
+    if use_default && !use_docker_driver {
+        emit_line(app, task, "[同架构] 默认 builder 为 docker-container 驱动，需显式指定输出方式", "stdout");
+    } else if use_docker_driver {
         emit_line(app, task, "[本机优先] 同架构构建走 default builder：FROM 先查本机镜像库，缺失才联网拉取", "stdout");
     }
     step(app, task, &log_file, cancel, &args, "build_failed").await?;
 
-    if use_default {
-        // default 驱动：产物已在本机镜像库（load_local 无需额外步骤）；导出用 save、推送用 push
+    if use_docker_driver {
+        // docker 驱动：产物已在本机镜像库（load_local 无需额外步骤）；导出用 save、推送用 push
         if let Some(tar) = &tar_path {
             step(app, task, &log_file, cancel, &["save".into(), "-o".into(), tar.clone(), local_tag.clone()], "docker_save_failed").await?;
         }
@@ -255,6 +262,7 @@ mod tests {
             project_context_dir: String::new(),
             registry: String::new(),
             builder_name: "hr-builder".into(),
+            default_driver: "docker".into(),
             image_arch_suffix: suffix,
             outputs: Outputs::default(),
             export_dir: "/tmp/export".into(),
