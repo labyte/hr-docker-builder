@@ -107,9 +107,17 @@
     "edit": "编辑",
     "delete": "删除",
     "deleteConfirm": "删除该程序？",
+    "batchDeleteConfirm": "确定删除选中的 {{count}} 个程序？",
     "empty": "还没有程序",
     "disabled": "未启用",
-    "pathIssue": "路径不存在，请检查配置"
+    "pathIssue": "路径不存在，请检查配置",
+    "copy": "复制",
+    "copied": "已复制程序",
+    "more": "更多",
+    "selected": "已选 {{count}}/{{total}}",
+    "sortName": "按名称",
+    "sortEnabled": "按已选",
+    "sortLastBuild": "按构建时间"
   },
   "status": {
     "running": "构建中",

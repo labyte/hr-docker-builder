@@ -107,9 +107,17 @@
     "edit": "Edit",
     "delete": "Delete",
     "deleteConfirm": "Remove this program?",
+    "batchDeleteConfirm": "Delete {{count}} selected program(s)?",
     "empty": "No programs yet",
     "disabled": "disabled",
-    "pathIssue": "Path not found, check config"
+    "pathIssue": "Path not found, check config",
+    "copy": "Copy",
+    "copied": "Program copied",
+    "more": "More",
+    "selected": "{{count}}/{{total}} selected",
+    "sortName": "By name",
+    "sortEnabled": "By selected",
+    "sortLastBuild": "By last build"
   },
   "status": {
     "running": "building",

@@ -1,13 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { App, Button, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { DeleteFilled, EditFilled, WarningFilled } from '@ant-design/icons';
+import { App, Button, Dropdown, Empty, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { CopyFilled, DeleteFilled, EditFilled, EllipsisOutlined, WarningFilled } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useStore } from '../store';
 import { errText } from '../utils';
 import type { Program, StatusEvent } from '../types';
 
 const STATUS_COLOR: Record<string, string> = { running:'processing', success:'success', failed:'error', canceled:'default', skipped:'default' };
+
+type SortMode = 'name' | 'enabled' | 'lastBuild';
 
 function StatusTags({ ev }: { ev?: Record<string, StatusEvent> }) {
   const { t } = useTranslation();
@@ -23,7 +25,7 @@ interface Props { onEdit: (p: Program) => void }
 
 export default function ProgramTable({ onEdit }: Props) {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const selectedProjectId = useStore(s => s.selectedProjectId);
   const project = useStore(s => s.config.projects.find(p => p.id === s.selectedProjectId));
   const programs = project?.programs ?? [];
@@ -32,6 +34,11 @@ export default function ProgramTable({ onEdit }: Props) {
   const statuses = useStore(s => s.statuses);
   const running = useStore(s => s.running);
   const removeProgram = useStore(s => s.removeProgram);
+  const copyProgram = useStore(s => s.copyProgram);
+  const upsertProject = useStore(s => s.upsertProject);
+
+  const [sortMode, setSortMode] = useState<SortMode>('name');
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   const issueSet = useMemo(() => {
     const set = new Set<string>();
@@ -39,10 +46,44 @@ export default function ProgramTable({ onEdit }: Props) {
     return set;
   }, [issues]);
 
-  // 复选框勾选即「参与构建」：选中态直接来源于持久化的 enabled 字段
   const enabledIds = useMemo(() => programs.filter(p => p.enabled).map(p => p.id), [programs]);
 
-  // 百分比等比缩放（tableLayout=fixed）：窗口变小时各列同比收窄，不隐藏任何列；操作列保底 9%
+  const displayPrograms = useMemo(() => {
+    const list = [...programs];
+    if (sortMode === 'name') {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortMode === 'enabled') {
+      list.sort((a, b) => (b.enabled ? 1 : 0) - (a.enabled ? 1 : 0) || a.name.localeCompare(b.name));
+    } else if (sortMode === 'lastBuild') {
+      list.sort((a, b) => {
+        const ta = a.lastBuild ? new Date(a.lastBuild.time).getTime() : 0;
+        const tb = b.lastBuild ? new Date(b.lastBuild.time).getTime() : 0;
+        return tb - ta;
+      });
+    }
+    return list;
+  }, [programs, sortMode]);
+
+  const handleBatchDelete = async () => {
+    if (!selectedProjectId || !enabledIds.length) return;
+    const count = enabledIds.length;
+    setDeletingIds(new Set(enabledIds));
+    try {
+      const confirmed = await new Promise<boolean>(resolve => {
+        modal.confirm({
+          title: t('table.batchDeleteConfirm', { count }),
+          okText: t('common.ok'), cancelText: t('common.cancel'), okButtonProps: { danger: true },
+          onOk: () => resolve(true), onCancel: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+      const err = await upsertProject({ ...project!, programs: programs.filter(p => !enabledIds.includes(p.id)) });
+      if (err) message.warning(errText(err));
+    } finally {
+      setDeletingIds(new Set());
+    }
+  };
+
   const columns: ColumnsType<Program> = useMemo(() => [
     {
       title: t('table.name'), dataIndex: 'name', width: '14%', ellipsis: { showTitle: false },
@@ -56,8 +97,8 @@ export default function ProgramTable({ onEdit }: Props) {
       ),
     },
     { title: t('table.image'), dataIndex: 'image', width: '16%', ellipsis: { showTitle: false }, render: (_, r) => <Tooltip title={`${r.image}:${r.defaultVersion}`} placement="topLeft"><span style={{ fontFamily:'monospace', fontSize:12 }}>{r.image}:{r.defaultVersion}</span></Tooltip> },
-    { title: t('table.dockerfile'), dataIndex: 'dockerfile', width: '23%', ellipsis:{ showTitle:false }, render: (v:string) => <Tooltip title={v}><span style={{ fontFamily:'monospace', fontSize:12 }}>{v}</span></Tooltip> },
-    { title: t('table.status'), width: '18%', render: (_, r) => <StatusTags ev={statuses[r.id]} /> },
+    { title: t('table.dockerfile'), dataIndex: 'dockerfile', width: '24%', ellipsis:{ showTitle:false }, render: (v:string) => <Tooltip title={v}><span style={{ fontFamily:'monospace', fontSize:12 }}>{v}</span></Tooltip> },
+    { title: t('table.status'), width: '12%', render: (_, r) => <StatusTags ev={statuses[r.id]} /> },
     {
       title: t('table.lastBuild'), width: '13%',
       render: (_, r) => {
@@ -67,27 +108,80 @@ export default function ProgramTable({ onEdit }: Props) {
       },
     },
     {
-      title: t('table.actions'), width: '9%',
-      render: (_, r) => (
-        <Space size={4}>
-          <Button size="small" type="text" icon={<EditFilled />} disabled={running} onClick={() => onEdit(r)} />
-          <Popconfirm title={t('table.deleteConfirm')} onConfirm={async () => {
-            const err = await removeProgram(selectedProjectId!, r.id);
-            if (err) message.warning(errText(err));
-          }} okText={t('common.ok')} cancelText={t('common.cancel')}>
-            <Button size="small" type="text" danger icon={<DeleteFilled />} disabled={running} />
-          </Popconfirm>
-        </Space>
-      ),
+      title: t('table.actions'), width: '8%',
+      render: (_, r) => {
+        const menuItems = [
+          { key: 'edit', icon: <EditFilled />, label: t('common.edit'), onClick: () => onEdit(r) },
+          { key: 'copy', icon: <CopyFilled />, label: t('table.copy'),
+            onClick: async () => {
+              if (!selectedProjectId) return;
+              const err = await copyProgram(selectedProjectId, r.id);
+              if (err) message.warning(errText(err));
+              else message.success(t('table.copied'));
+            } },
+          { type: 'divider' as const },
+          { key: 'delete', icon: <DeleteFilled />, label: t('table.delete'), danger: true,
+            onClick: async () => {
+              if (!selectedProjectId) return;
+              setDeletingIds(new Set([r.id]));
+              try {
+                const confirmed = await new Promise<boolean>(resolve => {
+                  modal.confirm({
+                    title: t('table.deleteConfirm'),
+                    okText: t('common.ok'), cancelText: t('common.cancel'), okButtonProps: { danger: true },
+                    onOk: () => resolve(true), onCancel: () => resolve(false),
+                  });
+                });
+                if (!confirmed) return;
+                const err = await removeProgram(selectedProjectId, r.id);
+                if (err) message.warning(errText(err));
+              } finally { setDeletingIds(new Set()); }
+            } },
+        ];
+        return (
+          <Dropdown trigger={['click']} menu={{ items: menuItems }} disabled={running}>
+            <Button size="small" type="text" icon={<EllipsisOutlined />} disabled={running}
+              onClick={(e) => e.stopPropagation()} style={{ fontSize: 14 }} />
+          </Dropdown>
+        );
+      },
     },
-  ], [t, statuses, issueSet, running, removeProgram, onEdit, message, selectedProjectId]);
+  ], [t, statuses, issueSet, running, onEdit, message, modal, selectedProjectId, copyProgram, removeProgram]);
+
+  const selectedCount = enabledIds.length;
+  const totalCount = programs.length;
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+      {totalCount > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px 0', flexShrink: 0 }}>
+          <Segmented size="small" value={sortMode} onChange={v => setSortMode(v as SortMode)}
+            options={[
+              { label: t('table.sortName'), value: 'name' },
+              { label: t('table.sortEnabled'), value: 'enabled' },
+              { label: t('table.sortLastBuild'), value: 'lastBuild' },
+            ]}
+          />
+          {selectedCount > 0 && (
+            <>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('table.selected', { count: selectedCount, total: totalCount })}
+              </Typography.Text>
+              <Button size="small" danger type="text" icon={<DeleteFilled />} onClick={handleBatchDelete}
+                disabled={running} style={{ fontSize: 12 }}>
+                {t('table.delete')}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       <div style={{ flex:1, overflow:'auto', padding:'12px' }}>
         <Table<Program>
-          size="small" rowKey="id" columns={columns} dataSource={programs} pagination={false} tableLayout="fixed"
+          size="small" rowKey="id" columns={columns} dataSource={displayPrograms} pagination={false} tableLayout="fixed"
           locale={{ emptyText: <Empty description={t('table.empty')} style={{ padding:'36px 0' }} /> }}
+          onRow={(record) => ({
+            style: deletingIds.has(record.id) ? { background: '#fff1f0' } : undefined,
+          })}
           rowSelection={{
             selectedRowKeys: enabledIds,
             onChange: keys => {

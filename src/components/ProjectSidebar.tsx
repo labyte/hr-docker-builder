@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Checkbox, Dropdown, Input, List, Modal, Segmented, Tooltip, Typography } from 'antd';
-import { CloudFilled, CopyFilled, DeleteFilled, HomeFilled, EditFilled, FolderOpenFilled, PlusOutlined, SaveFilled } from '@ant-design/icons';
+import { CloudFilled, CopyFilled, DeleteFilled, EllipsisOutlined, HomeFilled, EditFilled, FolderOpenFilled, PlusOutlined, SaveFilled } from '@ant-design/icons';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import { errText } from '../utils';
@@ -57,8 +57,7 @@ export default function ProjectSidebar() {
           const sel = selectedId === p.id;
           const menuItems = [
             { key: 'copy', icon: <CopyFilled />, label: t('sidebar.copy'),
-              onClick: async (info: { domEvent: React.MouseEvent | React.KeyboardEvent }) => {
-                info.domEvent.stopPropagation();
+              onClick: async () => {
                 const c = await copyProject(p.id);
                 if (c) { selectProject(c.id); message.success(t('sidebar.copied')); }
               } },
@@ -72,8 +71,7 @@ export default function ProjectSidebar() {
               }) },
           ];
           return (
-            <Dropdown key={p.id} trigger={['contextMenu']} menu={{ items: menuItems }}>
-            <div
+            <div key={p.id}
               className="sidebar-item"
               onClick={() => selectProject(p.id)}
               style={{
@@ -92,9 +90,15 @@ export default function ProjectSidebar() {
                     >
                       {p.name}
                     </Typography.Text>
-                    <span style={{ fontSize: 11, color: '#bbb', flexShrink: 0, marginLeft: 'auto' }}>
+                    <span style={{ fontSize: 11, color: '#bbb', flexShrink: 0 }}>
                       {p.programs.length}
                     </span>
+                    <Dropdown trigger={['click']} menu={{ items: menuItems }}>
+                      <Button type="text" size="small" icon={<EllipsisOutlined />}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ flexShrink: 0, fontSize: 14, width: 24, height: 24, minWidth: 24, padding: 0, color: '#999' }}
+                      />
+                    </Dropdown>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 7 }}>
                     <span style={{ fontSize: 10, fontWeight: 600, color: archColor(p.defaultArch), background: `${archColor(p.defaultArch)}18`, padding: '1px 5px', borderRadius: 3 }}>{p.defaultArch}</span>
@@ -103,7 +107,6 @@ export default function ProjectSidebar() {
                   </div>
                 </div>
             </div>
-            </Dropdown>
           );
         }}
       />

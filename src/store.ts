@@ -60,6 +60,7 @@ export interface BuilderState {
   copyProject: (id: string) => Promise<Project | null>;
   upsertProgram: (projectId: string, p: Program) => Promise<string | null>;
   removeProgram: (projectId: string, id: string) => Promise<string | null>;
+  copyProgram: (projectId: string, id: string) => Promise<string | null>;
   saveGlobal: (patch: Partial<AppConfig['global']>) => Promise<string | null>;
   startBuild: () => Promise<string | null>;
   cancelBuild: () => Promise<void>;
@@ -186,6 +187,15 @@ export const useStore = create<BuilderState>((set, get) => ({
   removeProgram: async (projectId, id) => {
     const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return `project_not_found:${projectId}`;
     return s.upsertProject({ ...prj, programs: prj.programs.filter(x => x.id !== id) });
+  },
+  copyProgram: async (projectId, id) => {
+    const s = get(); const prj = s.config.projects.find(p => p.id === projectId); if (!prj) return `project_not_found:${projectId}`;
+    const src = prj.programs.find(x => x.id === id); if (!src) return `program_not_found:${id}`;
+    const idx = prj.programs.indexOf(src);
+    const clone: Program = { ...src, id: `prog-${Date.now().toString(36)}`, name: `${src.name} (副本)`, lastBuild: null };
+    const programs = [...prj.programs];
+    programs.splice(idx + 1, 0, clone);
+    return s.upsertProject({ ...prj, programs });
   },
   saveGlobal: async (patch) => {
     const s = get();
