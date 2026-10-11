@@ -296,19 +296,37 @@ pub async fn offline_registry_running() -> bool {
     !running_registries().await.is_empty()
 }
 
+/// 读取已存在 registry 容器的实际发布端口（容器内 5000 的宿主映射）；不可得返回 None
+pub async fn actual_publish_port(name: &str) -> Option<u16> {
+    let fmt = r#"{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}"#;
+    let out = docker_cmd().args(["inspect", "--format", fmt, name]).output().await.ok()?;
+    if !out.status.success() { return None; }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
 /// 重启后自动拉起已导入的 offline registry 容器（容器已 `--restart unless-stopped` 创建，
-/// Docker 正常自启时已自动恢复；仅在 Docker 未设为开机自启或非正常关机后才需手动拉起）
+/// Docker 正常自启时已自动恢复；仅在 Docker 未设为开机自启或非正常关机后才需手动拉起）。
+/// 同时做端口对账：旧版本流程可能留下"记录端口 ≠ 容器实际发布端口"的错位，
+/// 按实际端口修正并重写 registries.json + buildkitd.toml（builder 侧经一键修复重建后生效；
+/// 探测面板会以端口漂移行提示用户）
 pub async fn auto_start_registries(root: &Path) {
     let Some(regs) = load_registries(root) else { return };
     if regs.is_empty() { return }
+    let mut regs = regs;
+    let mut reconciled = false;
     let running = running_registries().await;
-    for r in &regs {
+    for r in &mut regs {
         let name = format!("hr-offline-reg-{}", r.index);
-        if running.iter().any(|c| c == &name) { continue }
-        let exists = docker_cmd().args(["inspect", &name]).output().await
-            .map(|o| o.status.success()).unwrap_or(false);
-        if exists { let _ = docker_cmd().args(["start", &name]).output().await; }
+        if !running.iter().any(|c| c == &name) {
+            let exists = docker_cmd().args(["inspect", &name]).output().await
+                .map(|o| o.status.success()).unwrap_or(false);
+            if exists { let _ = docker_cmd().args(["start", &name]).output().await; }
+        }
+        if let Some(actual) = actual_publish_port(&name).await {
+            if actual != r.port { r.port = actual; reconciled = true; }
+        }
     }
+    if reconciled { let _ = write_registries(root, &regs); }
 }
 
 /// builder 的 buildkit 容器是否挂载了 mirror 配置（创建时带 --config buildkitd.toml 的代理判据）
@@ -359,33 +377,46 @@ pub async fn start_registry(name: &str) -> Result<(), String> {
     run_ok(&["start", name]).await
 }
 
-/// 一键修复（在线机）：registry 容器还在（含已停止）则直接拉起；已被删除则用 registry:2 在线重建
+/// 一键修复：registry 容器还在（含已停止）则直接拉起——并做端口对账：旧流程可能留下
+/// "记录端口 ≠ 容器实际发布端口"的错位，按实际修正并重写 registries.json/buildkitd.toml，
+/// 调用方随后以新 toml 重建 builder 即可对齐；容器已被删除则用 registry:2 在线重建
 /// （镜像通常本机就有：导出/导入通道都带），再按当前各项目 Dockerfile 的 FROM 引用从上游回填
-/// 多架构 mirror 数据——在线机无需"导出再导入"即可自愈；无外网且本地无 registry:2 时才要求重新导入
+/// 多架构 mirror 数据——在线机无需"导出再导入"即可自愈；无外网且本地无 registry:2 时才要求重新导入。
+/// 返回最终（对账后）的 registry 清单
 pub async fn repair_registries(
     app: &AppHandle,
     run_id: &str,
-    regs: &[RegistryEntry],
+    mut regs: Vec<RegistryEntry>,
     dockerfiles: &[String],
     cancel: &Arc<AtomicBool>,
-) -> Result<(), String> {
-    let mut rebuilt: Vec<&RegistryEntry> = Vec::new();
-    for r in regs {
+    root: &Path,
+) -> Result<Vec<RegistryEntry>, String> {
+    let mut rebuilt: Vec<RegistryEntry> = Vec::new();
+    let mut reconciled = false;
+    for r in &mut regs {
         if cancel.load(Ordering::Relaxed) { return Err("canceled".into()); }
         let name = format!("hr-offline-reg-{}", r.index);
         let exists = docker_cmd().args(["inspect", &name]).output().await
             .map(|o| o.status.success()).unwrap_or(false);
         if exists {
             start_registry(&name).await.map_err(|e| format!("拉起 {name} 失败: {e}"))?;
+            if let Some(actual) = actual_publish_port(&name).await {
+                if actual != r.port {
+                    emit_line(app, run_id, &format!("容器 {name} 实际发布端口 {actual} 与记录 {} 不一致，按实际端口修正 mirror 配置", r.port), "stdout");
+                    r.port = actual;
+                    reconciled = true;
+                }
+            }
             continue;
         }
         emit_line(app, run_id, &format!("registry 容器 {name} 缺失，在线重建（{} → :{}）...", r.host, r.port), "stdout");
         let bind = format!("{}:{}:5000", publish_bind(), r.port);
         run_stream(app, run_id, &["run", "-d", "--name", &name, "--restart", "unless-stopped", "-p", &bind, "registry:2"], cancel).await
             .map_err(|e| format!("mirror_rebuild_failed: {e}"))?;
-        rebuilt.push(r);
+        rebuilt.push(r.clone());
     }
-    if rebuilt.is_empty() { return Ok(()); }
+    if reconciled { write_registries(root, &regs).map_err(|e| format!("写回 mirror 注册表失败: {e}"))?; }
+    if rebuilt.is_empty() { return Ok(regs); }
 
     // 收集当前各项目 Dockerfile 的 FROM 引用，按重建 registry 对应的上游 host 回填
     let mut seen = HashSet::new();
@@ -413,7 +444,54 @@ pub async fn repair_registries(
         }
     }
     emit_line(app, run_id, &format!("{} 个 registry 容器已在线重建并回填完成", rebuilt.len()), "stdout");
-    Ok(())
+    Ok(regs)
+}
+
+/// mirror 活性探测（供环境信息面板）：
+/// ①端口对账：各记录 registry 容器的实际发布端口 vs 导入记录（容器缺失不算漂移——修复会重建）；
+/// ②内容可达：从 buildkit 容器视角以 v2 类型 Accept 命中各项目 FROM 引用的 manifest——
+///   schema1 格式残留、回填数据缺失、端口错配都会在此暴露；builder 容器不存在时跳过判定
+///   （由 builderConfigured 行另行反映）。返回 (port_drift, content_ok)
+pub async fn verify_mirror(root: &Path, builder: &str, dockerfiles: &[String]) -> (bool, bool) {
+    let Some(regs) = load_registries(root) else { return (false, true) };
+    let mut port_drift = false;
+    for r in &regs {
+        let name = format!("hr-offline-reg-{}", r.index);
+        let exists = docker_cmd().args(["inspect", &name]).output().await
+            .map(|o| o.status.success()).unwrap_or(false);
+        if exists {
+            if let Some(actual) = actual_publish_port(&name).await {
+                if actual != r.port { port_drift = true; }
+            }
+        }
+    }
+    let bname = format!("buildx_buildkit_{}0", builder);
+    let builder_running = docker_cmd().args(["inspect", &bname]).output().await
+        .map(|o| o.status.success()).unwrap_or(false);
+    if !builder_running { return (port_drift, true); }
+    let accept = "Accept: application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json";
+    let mut seen = HashSet::new();
+    let mut probed = 0usize;
+    let mut hit = 0usize;
+    'outer: for df in dockerfiles {
+        for img in images_from_file(df) {
+            if probed >= 3 { break 'outer; } // 控制探测成本：最多 3 个去重后的 FROM 引用
+            if !seen.insert(img.clone()) { continue; }
+            let Some((host, path)) = split_ref(&img) else { continue };
+            let Some(r) = regs.iter().find(|x| x.host == host) else { continue };
+            let reg_name = format!("hr-offline-reg-{}", r.index);
+            let running = docker_cmd().args(["ps", "--filter", &format!("name={reg_name}"), "--format", "{{.Names}}"]).output().await
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim() == reg_name).unwrap_or(false);
+            if !running { continue; }
+            let (repo, tag) = split_repo_tag(&path);
+            let url = format!("http://{}/v2/{}/manifests/{}", mirror_addr(r.port), repo, tag);
+            let ok = docker_cmd().args(["exec", &bname, "wget", "-q", "-O", "/dev/null", "--timeout", "4", "--header", accept, &url])
+                .output().await.map(|o| o.status.success()).unwrap_or(false);
+            probed += 1;
+            if ok { hit += 1; }
+        }
+    }
+    (port_drift, probed == 0 || hit == probed)
 }
 
 /// buildkit mirror 寻址：

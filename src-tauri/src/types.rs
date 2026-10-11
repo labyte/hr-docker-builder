@@ -247,6 +247,10 @@ pub struct MirrorStatus {
     pub containers_total: usize,
     /// builder 的 buildkit 容器已挂载 mirror 配置
     pub builder_configured: bool,
+    /// registry 容器实际发布端口与导入记录不一致（旧流程遗留错位；一键修复可对账）
+    pub port_drift: bool,
+    /// 从 buildkit 视角能以 v2 格式命中 FROM 引用；false = schema1 残留 / 回填数据缺失
+    pub content_ok: bool,
 }
 
 // ── 配置损坏通知（load 时记录，get_config 冲刷为 config-corrupt 事件给前端弹窗）──

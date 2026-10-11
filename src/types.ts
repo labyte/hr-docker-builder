@@ -85,6 +85,10 @@ export interface MirrorStatus {
   containersTotal: number;
   /** builder 已挂载 mirror 配置 */
   builderConfigured: boolean;
+  /** registry 容器实际发布端口与导入记录不一致（一键修复可对账） */
+  portDrift: boolean;
+  /** buildkit 视角能以 v2 格式命中 FROM 镜像；false = mirror 数据残留/缺失 */
+  contentOk: boolean;
 }
 
 export interface StartBuildRequest {

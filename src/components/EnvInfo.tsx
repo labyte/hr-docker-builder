@@ -57,7 +57,8 @@ export default function EnvInfoPanel({ env, width }: { env: EnvInfo | null; widt
   const caps = deriveCaps(env);
   const mirror = env.mirror;
   const mirrorReady = mirror.configExists && mirror.containersRunning > 0
-    && mirror.containersRunning >= mirror.containersTotal && mirror.builderConfigured;
+    && mirror.containersRunning >= mirror.containersTotal && mirror.builderConfigured
+    && !mirror.portDrift && mirror.contentOk;
   return (
     <div style={{ width, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div>
@@ -81,6 +82,8 @@ export default function EnvInfoPanel({ env, width }: { env: EnvInfo | null; widt
               <Row ok={mirror.containersRunning > 0 && mirror.containersRunning >= mirror.containersTotal}
                 name={t('env.mirrorContainers')} detail={`${mirror.containersRunning}/${mirror.containersTotal} ${t('env.mirrorRunning')}`} />
               <Row ok={mirror.builderConfigured} name={t('env.mirrorBuilder')} />
+              <Row ok={!mirror.portDrift} name={t('env.mirrorPortMatch')} />
+              <Row ok={mirror.contentOk} name={t('env.mirrorContent')} />
             </>
           )}
         </div>

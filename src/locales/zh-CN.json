@@ -82,6 +82,8 @@
     "mirrorContainers": "本地 registry 容器",
     "mirrorRunning": "运行中",
     "mirrorBuilder": "Builder 已挂载 mirror 配置",
+    "mirrorPortMatch": "registry 端口与导入记录一致",
+    "mirrorContent": "FROM 基础镜像可从 mirror 命中",
     "mirrorRepair": "一键修复",
     "mirrorRepairOk": "离线 mirror 已修复",
     "dockerMissing": "未检测到 docker，请先安装 Docker Desktop / Engine（检测中，就绪后自动恢复）",

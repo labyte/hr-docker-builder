@@ -18,6 +18,8 @@ function makeEnv(overrides: Partial<EnvInfo> = {}): EnvInfo {
       containersRunning: 0,
       containersTotal: 0,
       builderConfigured: false,
+      portDrift: false,
+      contentOk: true,
     },
     ...overrides,
   };

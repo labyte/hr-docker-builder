@@ -74,22 +74,36 @@ pub fn save_config(app: AppHandle, state: State<AppState>, config: AppConfig) ->
     Ok(project_store::validate(&config))
 }
 
-/// 离线 mirror 细分状态：配置文件 / registry 容器（运行中/总数）/ builder 是否挂载 mirror 配置
-async fn probe_mirror(root: &std::path::Path, builder: &str) -> MirrorStatus {
+/// 离线 mirror 细分状态：配置文件 / registry 容器（运行中/总数）/ builder 是否挂载 mirror 配置 /
+/// 端口对账 + buildkit 视角内容可达探测（历史错位与 schema1 残留在面板直接暴露）
+async fn probe_mirror(root: &std::path::Path, builder: &str, dockerfiles: &[String]) -> MirrorStatus {
     let config_exists = offline_pack::offline_mirror_config(root).is_some();
     let regs = offline_pack::load_registries(root);
     let containers_total = regs.as_ref().map(|v| v.len()).unwrap_or(0);
     let imported = config_exists || regs.is_some();
     let containers_running = offline_pack::running_registries().await.len();
     let builder_configured = imported && offline_pack::builder_has_mirror_config(builder).await;
-    MirrorStatus { imported, config_exists, containers_running, containers_total, builder_configured }
+    let (port_drift, content_ok) = if containers_total > 0 && containers_running > 0 {
+        offline_pack::verify_mirror(root, builder, dockerfiles).await
+    } else {
+        (false, true)
+    };
+    MirrorStatus { imported, config_exists, containers_running, containers_total, builder_configured, port_drift, content_ok }
+}
+
+/// 当前各项目配置的 Dockerfile 路径（mirror 内容探测/在线自建推导共用）
+fn collect_dockerfiles(cfg: &AppConfig) -> Vec<String> {
+    cfg.projects.iter().flat_map(|p| p.programs.iter())
+        .filter(|p| !p.dockerfile.is_empty())
+        .map(|p| p.dockerfile.clone())
+        .collect()
 }
 
 #[tauri::command]
 pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
-    let (builder, root) = {
+    let (builder, root, dockerfiles) = {
         let cfg = state.config.lock();
-        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), collect_dockerfiles(&cfg))
     };
     // 重启后自动恢复离线环境：拉起已导入的 registry 容器（Docker 未开机自启/非正常关机时可能未恢复）
     offline_pack::auto_start_registries(&root).await;
@@ -101,7 +115,7 @@ pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<Env
         env_checker::ensure_qemu_registered(&env).await;
         env = env_checker::probe(&builder).await;
     }
-    env.mirror = probe_mirror(&root, &builder).await;
+    env.mirror = probe_mirror(&root, &builder, &dockerfiles).await;
     Ok(env)
 }
 
@@ -113,12 +127,7 @@ pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<Env
 pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let (builder, root, dockerfiles) = {
         let cfg = state.config.lock();
-        let dfs = cfg.projects.iter()
-            .flat_map(|p| p.programs.iter())
-            .filter(|p| !p.dockerfile.is_empty())
-            .map(|p| p.dockerfile.clone())
-            .collect::<Vec<_>>();
-        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), dfs)
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), collect_dockerfiles(&cfg))
     };
     let loaded = offline_pack::load_registries(&root);
     let regs = match &loaded {
@@ -131,8 +140,8 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
     let cancel = Arc::new(AtomicBool::new(false));
     *state.queue_cancel.lock() = Some(cancel.clone());
     let rid = Local::now().format("repair-%Y%m%d-%H%M%S").to_string();
-    offline_pack::repair_registries(&app, &rid, &regs, &dockerfiles, &cancel).await?;
-    // 自建路径写回注册表（buildkitd.toml + registries.json），后续按已导入处理
+    // 修复内含端口对账：对账后的清单用于自建路径写回注册表（已导入路径由 repair 自行写回）
+    let regs = offline_pack::repair_registries(&app, &rid, regs, &dockerfiles, &cancel, &root).await?;
     if loaded.is_none() {
         offline_pack::write_registries(&root, &regs).map_err(|e| format!("写离线 mirror 注册表失败: {e}"))?;
     }
@@ -141,9 +150,9 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
 
 #[tauri::command]
 pub async fn ensure_builder(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
-    let (builder, root) = {
+    let (builder, root, dockerfiles) = {
         let cfg = state.config.lock();
-        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), collect_dockerfiles(&cfg))
     };
     // 离线机若已导入 registry mirror 且容器在跑，builder 需带 mirror 配置创建
     let config = match offline_pack::offline_registry_running().await {
@@ -151,7 +160,7 @@ pub async fn ensure_builder(app: AppHandle, state: State<'_, AppState>) -> Resul
         false => None,
     };
     let mut env = env_checker::ensure_builder(&builder, config.as_deref()).await?;
-    env.mirror = probe_mirror(&root, &builder).await;
+    env.mirror = probe_mirror(&root, &builder, &dockerfiles).await;
     Ok(env)
 }
 

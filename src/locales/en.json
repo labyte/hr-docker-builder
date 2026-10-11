@@ -82,6 +82,8 @@
     "mirrorContainers": "Local registry containers",
     "mirrorRunning": "running",
     "mirrorBuilder": "Builder mounted with mirror config",
+    "mirrorPortMatch": "Registry port matches import records",
+    "mirrorContent": "Base images resolvable via mirror",
     "mirrorRepair": "Repair now",
     "mirrorRepairOk": "Offline mirror repaired",
     "dockerMissing": "docker not found. Install Docker Desktop / Engine (auto-rechecks until ready)",
