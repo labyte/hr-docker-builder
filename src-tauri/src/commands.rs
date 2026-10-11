@@ -145,7 +145,10 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
     if loaded.is_none() {
         offline_pack::write_registries(&root, &regs).map_err(|e| format!("写离线 mirror 注册表失败: {e}"))?;
     }
-    offline_pack::bootstrap_offline_env(&app, &builder, &rid, &root).await
+    let msg = offline_pack::bootstrap_offline_env(&app, &builder, &rid, &root).await?;
+    // 修复后同样补种宿主架构基础镜像到本机库
+    offline_pack::seed_local_images(&app, &rid, &root, &dockerfiles, &cancel).await;
+    Ok(msg)
 }
 
 #[tauri::command]
@@ -318,9 +321,9 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
 #[tauri::command]
 pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pack_dir: String) -> Result<String, String> {
     acquire_offline(&state, "busy_import")?; // 与构建队列及另一次导出/导入/修复互斥；导入期间禁止改配置（root 已固定）
-    let (builder, root) = {
+    let (builder, root, dockerfiles) = {
         let cfg = state.config.lock();
-        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
+        (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global), collect_dockerfiles(&cfg))
     };
     let cancel = Arc::new(AtomicBool::new(false));
     *state.queue_cancel.lock() = Some(cancel.clone());
@@ -347,6 +350,8 @@ pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pac
         }
         match offline_pack::bootstrap_offline_env(&app2, &bn, &rid2, &root).await {
             Ok(msg) => {
+                // 同架构构建所需的宿主架构基础镜像补种（纯本地 mirror；离线包同架构时无操作）
+                offline_pack::seed_local_images(&app2, &rid2, &root, &dockerfiles, &cancel).await;
                 let _ = app2.emit("build-log", LogEvent { task_id: rid2.clone(), project_id: rid2.clone(), line: msg, stream: "stdout".into() });
                 let _ = app2.emit("queue-done", QueueDone { kind: "import".into(), success: 1, failed: 0, canceled: 0, skipped: 0, export_files: vec![], log_dir: log_dir_str });
             }

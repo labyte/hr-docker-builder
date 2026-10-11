@@ -11,6 +11,7 @@ use tokio::task::JoinSet;
 use crate::commands::AppState;
 use crate::docker_exec;
 use crate::env_checker;
+use crate::offline_pack;
 use crate::project_store;
 use crate::types::{BuildTask, QueueDone, StartBuildRequest, StatusEvent};
 
@@ -79,6 +80,15 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
     let any_fail = Arc::new(AtomicBool::new(false));
     let sem = Arc::new(Semaphore::new(req.concurrency.max(1)));
     let fail_fast = req.fail_fast;
+
+    // 同架构离线构建补种：images.tar 只含导出机架构变体时，从本地 mirror 拉宿主架构变体入本机库；
+    // mirror 未就绪时为空操作；在队列执行前完成，日志走全局通道
+    if tasks.iter().any(|t| !t.host_arch.is_empty() && t.arch == t.host_arch) {
+        let mut dfs: Vec<String> = tasks.iter().map(|t| t.program.dockerfile.clone()).collect();
+        dfs.sort();
+        dfs.dedup();
+        offline_pack::seed_local_images(&app, &run_id, &root, &dfs, &cancel).await;
+    }
 
     let mut set = JoinSet::new();
     for task in tasks {

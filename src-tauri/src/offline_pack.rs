@@ -447,6 +447,52 @@ pub async fn repair_registries(
     Ok(regs)
 }
 
+/// 同架构离线构建补种：images.tar 只含导出机架构的基础镜像，跨架构机器导入后
+/// 同架构构建会在本机镜像库"tag 命中但架构不符"→ 回源联网 → 离线失败。
+/// 对每个 FROM 引用检查本机镜像库是否已有宿主架构变体；缺失则从本地 mirror 拉取
+/// （localhost registry，纯本地不出网）并转 tag 为原引用。mirror 未就绪/镜像不在
+/// mirror 中（离线包快照后才新增的 FROM）只告警不失败，返回补种数量。
+/// 调用时机：导入离线包、一键修复的自举之后；同架构构建任务入队时。
+pub async fn seed_local_images(
+    app: &AppHandle,
+    run_id: &str,
+    root: &Path,
+    dockerfiles: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> usize {
+    let Some(regs) = load_registries(root) else { return 0 };
+    if regs.is_empty() || running_registries().await.is_empty() { return 0; }
+    let host = crate::env_checker::host_arch().await;
+    let mut seeded = 0usize;
+    let mut seen = HashSet::new();
+    for df in dockerfiles {
+        for img in images_from_file(df) {
+            if !seen.insert(img.clone()) { continue; }
+            if cancel.load(Ordering::Relaxed) { return seeded; }
+            let Some((up_host, path)) = split_ref(&img) else { continue };
+            let Some(r) = regs.iter().find(|x| x.host == up_host) else { continue };
+            // 本机库已有该 tag 且架构匹配 → 跳过
+            let present = docker_cmd().args(["image", "inspect", "--format", "{{.Architecture}}", &img]).output().await
+                .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == host).unwrap_or(false);
+            if present { continue; }
+            let src = format!("localhost:{}/{}", r.port, path);
+            emit_line(app, run_id, &format!("本机镜像库缺 {img} 的 linux/{host} 变体，从 mirror 补种：{src}"), "stdout");
+            match run_stream(app, run_id, &["pull", "--platform", &format!("linux/{host}"), &src], cancel).await {
+                Ok(()) => {
+                    if let Err(e) = run_ok(&["tag", &src, &img]).await {
+                        emit_line(app, run_id, &format!("补种转 tag 失败: {e}"), "stderr");
+                    } else {
+                        seeded += 1;
+                    }
+                }
+                Err(e) => emit_line(app, run_id, &format!("补种失败 {src}（该镜像不在离线 mirror 中，需在在线机重新导出/导入）: {e}"), "stderr"),
+            }
+        }
+    }
+    if seeded > 0 { emit_line(app, run_id, &format!("已补种 {seeded} 个宿主架构基础镜像到本机镜像库"), "stdout"); }
+    seeded
+}
+
 /// mirror 活性探测（供环境信息面板）：
 /// ①端口对账：各记录 registry 容器的实际发布端口 vs 导入记录（容器缺失不算漂移——修复会重建）；
 /// ②内容可达：从 buildkit 容器视角以 v2 类型 Accept 命中各项目 FROM 引用的 manifest——
