@@ -18,6 +18,10 @@ function formatBuildArgs(args: Record<string, string>): string { return Object.e
 async function pickFile(exts?: string[]): Promise<string | null> { const r = await openDialog({ multiple:false, filters: exts ? [{ name:'files', extensions:exts }] : undefined }); return typeof r === 'string' ? r : null; }
 async function pickDir(): Promise<string | null> { const r = await openDialog({ directory:true }); return typeof r === 'string' ? r : null; }
 
+// 标识符/路径类输入统一禁用系统自动首字母大写与拼写纠正：
+// WKWebView（macOS）会跟随系统「自动完成句首大写」设置，镜像名/路径首字母被莫名大写
+const rawText = { autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false } as const;
+
 export default function ProgramFormModal({ open, initial, onClose }: Props) {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -68,26 +72,27 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
     <Modal open={open} title={initial ? t('form.editTitle') : t('form.newTitle')} onOk={onOk} onCancel={onClose} okText={t('common.save')} cancelText={t('common.cancel')} width={640} destroyOnClose>
       <Form form={form} layout="vertical" size="middle">
         <Row gutter={12}>
-          <Col span={8}><Form.Item name="name" label={t('form.name')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr-order-api" /></Form.Item></Col>
-          <Col span={8}><Form.Item name="image" label={t('form.image')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr/app" /></Form.Item></Col>
-          <Col span={8}><Form.Item name="defaultVersion" label={t('form.version')}><Input placeholder="latest" /></Form.Item></Col>
+          <Col span={8}><Form.Item name="name" label={t('form.name')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr-order-api" {...rawText} /></Form.Item></Col>
+          <Col span={8}><Form.Item name="image" label={t('form.image')} rules={[{ required:true, message:t('form.required') }]}><Input placeholder="hr/app" {...rawText} /></Form.Item></Col>
+          <Col span={8}><Form.Item name="defaultVersion" label={t('form.version')}><Input placeholder="latest" {...rawText} /></Form.Item></Col>
         </Row>
         <Form.Item label={t('form.projectFile')}>
           <Space.Compact style={{ width:'100%' }}>
-            <Form.Item name="projectFile" noStyle><Input placeholder="src/Order.Api/Order.Api.csproj" /></Form.Item>
+            <Form.Item name="projectFile" noStyle><Input placeholder="src/Order.Api/Order.Api.csproj" {...rawText} /></Form.Item>
             <Button onClick={async () => { const p = await pickFile(['csproj','sln']); if (p) form.setFieldValue('projectFile', p); }}>{t('form.pickFile')}</Button>
             <Button onClick={suggest}>{t('form.suggestFromProject')}</Button>
           </Space.Compact>
         </Form.Item>
-        <Form.Item name="dockerfile" label={t('form.dockerfile')} rules={[{ required:true, message:t('form.required') }]}>
+        <Form.Item label={t('form.dockerfile')} required>
           <Space.Compact style={{ width:'100%' }}>
-            <Form.Item name="dockerfile" noStyle><Input placeholder="Dockerfile" /></Form.Item>
-            <Button onClick={async () => { const p = await pickFile(['*']); if (p) form.setFieldValue('dockerfile', p); }}>{t('form.pickFile')}</Button>
+            <Form.Item name="dockerfile" noStyle rules={[{ required:true, message:t('form.required') }]}><Input placeholder="Dockerfile" {...rawText} /></Form.Item>
+            {/* Dockerfile 通常无扩展名：传任何扩展名 filters 都会被原生面板置灰（macOS allowedFileTypes / Windows *. 模式），故不加过滤 */}
+            <Button onClick={async () => { const p = await pickFile(); if (p) form.setFieldValue('dockerfile', p); }}>{t('form.pickFile')}</Button>
           </Space.Compact>
         </Form.Item>
-        <Form.Item name="context" label={t('form.context')} extra={t('form.contextFollowHint')}>
+        <Form.Item label={t('form.context')} extra={t('form.contextFollowHint')}>
           <Space.Compact style={{ width:'100%' }}>
-            <Form.Item name="context" noStyle><Input placeholder={t('form.contextFollowPlaceholder')} /></Form.Item>
+            <Form.Item name="context" noStyle><Input placeholder={t('form.contextFollowPlaceholder')} {...rawText} /></Form.Item>
             <Button onClick={async () => { const p = await pickDir(); if (p) form.setFieldValue('context', p); }}>{t('form.pickDir')}</Button>
           </Space.Compact>
         </Form.Item>
@@ -101,7 +106,7 @@ export default function ProgramFormModal({ open, initial, onClose }: Props) {
               ))}
             </div>
           )}
-          <Input.TextArea rows={3} value={argsText} onChange={e => setArgsText(e.target.value)} placeholder="CONFIGURATION=Release" style={{ fontFamily:'monospace', fontSize:12 }} />
+          <Input.TextArea rows={3} value={argsText} onChange={e => setArgsText(e.target.value)} placeholder="CONFIGURATION=Release" style={{ fontFamily:'monospace', fontSize:12 }} {...rawText} />
         </Form.Item>
       </Form>
     </Modal>
