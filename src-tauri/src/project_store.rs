@@ -35,13 +35,11 @@ fn read_at(app: &AppHandle, p: &Path) -> Result<Option<AppConfig>, String> {
             let backup = p.with_file_name(format!("{name}.corrupt-{ts}"));
             if fs::rename(p, &backup).is_err() { let _ = fs::write(&backup, &raw); }
             if let Some(state) = app.try_state::<AppState>() {
-                if let Ok(mut v) = state.corrupt_notices.lock() {
-                    v.push(ConfigCorruptEvent {
-                        path: p.to_string_lossy().to_string(),
-                        backup: backup.to_string_lossy().to_string(),
-                        error: e.to_string(),
-                    });
-                }
+                state.corrupt_notices.lock().push(ConfigCorruptEvent {
+                    path: p.to_string_lossy().to_string(),
+                    backup: backup.to_string_lossy().to_string(),
+                    error: e.to_string(),
+                });
             }
             Ok(None)
         }

@@ -45,7 +45,7 @@ fn main() {
             // 启动即加载配置，保证环境检测/构建读取到同一份数据
             let cfg = project_store::load(app.handle()).unwrap_or_default();
             let state = app.state::<AppState>();
-            *state.config.lock().unwrap() = cfg;
+            *state.config.lock() = cfg;
             fit_window_to_workarea(app);
             Ok(())
         })

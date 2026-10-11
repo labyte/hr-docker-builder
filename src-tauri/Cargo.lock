@@ -1243,6 +1243,7 @@ name = "hr-docker-builder"
 version = "0.2.5"
 dependencies = [
  "chrono",
+ "parking_lot",
  "regex",
  "serde",
  "serde_json",

@@ -1,7 +1,9 @@
 use std::io::Write;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use regex::Regex;
@@ -102,7 +104,8 @@ pub async fn execute(
     if context.trim().is_empty() { return Err(format!("context_invalid:{}", task.program.id)); }
     args.push(context.into());
 
-    let log_file = task.log_dir.join(format!("{}-{}.log", task.task_id, task.arch));
+    // task_id 本身已含架构（{program.id}-{arch}），不再重复拼接（此前会产出 prog-amd64-amd64.log）
+    let log_file = task.log_dir.join(format!("{}.log", task.task_id));
 
     // 1) build
     if use_default && !use_docker_driver {
@@ -198,7 +201,6 @@ async fn stream_cmd(
         std::fs::OpenOptions::new().create(true).append(true).open(log_file).map_err(|e| e.to_string())?,
     ));
 
-    let step_re = Regex::new(r"\[(\d+)/(\d+)\]").unwrap();
     let last_step = Arc::new(Mutex::new(String::new()));
 
     // 后续阶段（save/load/push）立即发送步骤标签；build 阶段由 buildx [N/M] 解析驱动
@@ -216,21 +218,20 @@ async fn stream_cmd(
     let (f1, f2) = (file.clone(), file.clone());
     let (tid1, tid2) = (task.task_id.clone(), task.task_id.clone());
     let (pid1, pid2) = (task.program.id.clone(), task.program.id.clone());
-    let (step_re1, step_re2) = (step_re.clone(), step_re.clone());
     let (last_step1, last_step2) = (last_step.clone(), last_step.clone());
     let (prog_id1, prog_id2) = (task.program.id.clone(), task.program.id.clone());
     let (arch1, arch2) = (task.arch.clone(), task.arch.clone());
     let is_build = phase.is_empty();
 
-    tokio::spawn(async move {
+    let h1 = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = app1.emit("build-log", LogEvent { task_id: tid1.clone(), project_id: pid1.clone(), line: line.clone(), stream: "stdout".into() });
-            if let Ok(mut f) = f1.lock() { let _ = writeln!(f, "{line}"); }
+            let _ = writeln!(*f1.lock(), "{line}");
             if is_build {
-                if let Some(caps) = step_re1.captures(&line) {
+                if let Some(caps) = step_re().captures(&line) {
                     let step_str = format!("[{}/{}]", &caps[1], &caps[2]);
-                    let mut last = last_step1.lock().unwrap();
+                    let mut last = last_step1.lock();
                     if *last != step_str {
                         *last = step_str.clone();
                         let _ = app1.emit("build-status", StatusEvent {
@@ -243,15 +244,15 @@ async fn stream_cmd(
             }
         }
     });
-    tokio::spawn(async move {
+    let h2 = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = app2.emit("build-log", LogEvent { task_id: tid2.clone(), project_id: pid2.clone(), line: line.clone(), stream: "stderr".into() });
-            if let Ok(mut f) = f2.lock() { let _ = writeln!(f, "[stderr] {line}"); }
+            let _ = writeln!(*f2.lock(), "[stderr] {line}");
             if is_build {
-                if let Some(caps) = step_re2.captures(&line) {
+                if let Some(caps) = step_re().captures(&line) {
                     let step_str = format!("[{}/{}]", &caps[1], &caps[2]);
-                    let mut last = last_step2.lock().unwrap();
+                    let mut last = last_step2.lock();
                     if *last != step_str {
                         *last = step_str.clone();
                         let _ = app2.emit("build-status", StatusEvent {
@@ -273,7 +274,16 @@ async fn stream_cmd(
             }
         }
     };
+    // 子进程退出后管道自然 EOF；join 两个 reader（5s 兜底超时，防孙进程持有管道句柄不退出）
+    // 保证尾部日志先于上层的状态事件（success/failed）送达前端，日志面板不错序
+    let _ = tokio::time::timeout(Duration::from_secs(5), async { let _ = h1.await; let _ = h2.await; }).await;
     Ok(status.code().unwrap_or(-1))
+}
+
+/// buildx plain 输出里 [N/M] 步骤标记的正则：进程级编译一次
+fn step_re() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\[(\d+)/(\d+)\]").expect("静态正则不可能非法"))
 }
 
 fn emit_line(app: &AppHandle, task: &BuildTask, line: &str, stream: &str) {

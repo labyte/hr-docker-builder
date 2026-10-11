@@ -1,5 +1,7 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -27,8 +29,8 @@ struct OfflineGuard(AppHandle);
 impl Drop for OfflineGuard {
     fn drop(&mut self) {
         if let Some(st) = self.0.try_state::<AppState>() {
-            if let Ok(mut b) = st.offline_busy.lock() { *b = None; }
-            if let Ok(mut q) = st.queue_cancel.lock() { *q = None; }
+            *st.offline_busy.lock() = None;
+            *st.queue_cancel.lock() = None;
         }
     }
 }
@@ -36,8 +38,8 @@ impl Drop for OfflineGuard {
 /// 互斥检查（锁序固定：queue_cancel → offline_busy，各处一致以杜绝交叉竞态）；
 /// 通过则占用 offline_busy，返回 Err 表示被谁挡下
 fn acquire_offline(state: &State<'_, AppState>, busy_key: &'static str) -> Result<(), String> {
-    let q = state.queue_cancel.lock().unwrap();
-    let mut b = state.offline_busy.lock().unwrap();
+    let q = state.queue_cancel.lock();
+    let mut b = state.offline_busy.lock();
     if q.is_some() { return Err("queue_running".into()); }
     if let Some(k) = *b { return Err(k.into()); }
     *b = Some(busy_key);
@@ -47,9 +49,9 @@ fn acquire_offline(state: &State<'_, AppState>, busy_key: &'static str) -> Resul
 #[tauri::command]
 pub fn get_config(app: AppHandle, state: State<AppState>) -> Result<AppConfig, String> {
     let cfg = project_store::load(&app)?;
-    *state.config.lock().unwrap() = cfg.clone();
+    *state.config.lock() = cfg.clone();
     // 冲刷配置损坏通知（前端 init 先注册监听再拉配置，见 store.ts）
-    for n in std::mem::take(&mut *state.corrupt_notices.lock().unwrap()) {
+    for n in std::mem::take(&mut *state.corrupt_notices.lock()) {
         let _ = app.emit("config-corrupt", n);
     }
     Ok(cfg)
@@ -58,13 +60,17 @@ pub fn get_config(app: AppHandle, state: State<AppState>) -> Result<AppConfig, S
 #[tauri::command]
 pub fn save_config(app: AppHandle, state: State<AppState>, config: AppConfig) -> Result<Vec<PathIssue>, String> {
     {
-        let q = state.queue_cancel.lock().unwrap();
-        let b = state.offline_busy.lock().unwrap();
+        let q = state.queue_cancel.lock();
+        let b = state.offline_busy.lock();
         if q.is_some() { return Err("queue_running".into()); }
         if let Some(k) = *b { return Err(k.into()); }
     }
+    // 持 config 锁落盘：与 save_history 的"改+写"互斥串行，
+    // 避免并发 rename 互相覆盖丢写入（先落盘后改内存，失败时状态与磁盘保持一致）
+    let mut cfg = state.config.lock();
     project_store::save(&app, &config)?;
-    *state.config.lock().unwrap() = config.clone();
+    *cfg = config.clone();
+    drop(cfg);
     Ok(project_store::validate(&config))
 }
 
@@ -82,7 +88,7 @@ async fn probe_mirror(root: &std::path::Path, builder: &str) -> MirrorStatus {
 #[tauri::command]
 pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
     let (builder, root) = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = state.config.lock();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
     };
     // 重启后自动恢复离线环境：拉起已导入的 registry 容器（Docker 未开机自启/非正常关机时可能未恢复）
@@ -106,7 +112,7 @@ pub async fn check_env(app: AppHandle, state: State<'_, AppState>) -> Result<Env
 #[tauri::command]
 pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let (builder, root, dockerfiles) = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = state.config.lock();
         let dfs = cfg.projects.iter()
             .flat_map(|p| p.programs.iter())
             .filter(|p| !p.dockerfile.is_empty())
@@ -123,7 +129,7 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
     acquire_offline(&state, "busy_repair")?;
     let _guard = OfflineGuard(app.clone());
     let cancel = Arc::new(AtomicBool::new(false));
-    *state.queue_cancel.lock().unwrap() = Some(cancel.clone());
+    *state.queue_cancel.lock() = Some(cancel.clone());
     let rid = Local::now().format("repair-%Y%m%d-%H%M%S").to_string();
     offline_pack::repair_registries(&app, &rid, &regs, &dockerfiles, &cancel).await?;
     // 自建路径写回注册表（buildkitd.toml + registries.json），后续按已导入处理
@@ -136,7 +142,7 @@ pub async fn repair_offline_mirror(app: AppHandle, state: State<'_, AppState>) -
 #[tauri::command]
 pub async fn ensure_builder(app: AppHandle, state: State<'_, AppState>) -> Result<EnvInfo, String> {
     let (builder, root) = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = state.config.lock();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
     };
     // 离线机若已导入 registry mirror 且容器在跑，builder 需带 mirror 配置创建
@@ -157,14 +163,14 @@ pub async fn install_qemu() -> Result<String, String> {
 #[tauri::command]
 pub fn start_build(app: AppHandle, state: State<AppState>, req: StartBuildRequest) -> Result<String, String> {
     {
-        let mut q = state.queue_cancel.lock().unwrap();
-        let b = state.offline_busy.lock().unwrap();
+        let mut q = state.queue_cancel.lock();
+        let b = state.offline_busy.lock();
         if let Some(k) = *b { return Err(k.into()); }
         if q.is_some() { return Err("queue_running".into()); }
         *q = Some(Arc::new(AtomicBool::new(false)));
     }
     if let Err(e) = validate_request(&state, &req) {
-        *state.queue_cancel.lock().unwrap() = None;
+        *state.queue_cancel.lock() = None;
         return Err(e);
     }
     let run_id = Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -186,7 +192,7 @@ pub fn start_build(app: AppHandle, state: State<AppState>, req: StartBuildReques
 }
 
 fn validate_request(state: &State<AppState>, req: &StartBuildRequest) -> Result<(), String> {
-    let cfg = state.config.lock().unwrap();
+    let cfg = state.config.lock();
     if req.program_ids.is_empty() { return Err("no_programs".into()); }
     if req.arches.is_empty() { return Err("no_arches".into()); }
     if !req.outputs.export_file && !req.outputs.load_local && !req.outputs.push { return Err("no_outputs".into()); }
@@ -206,15 +212,18 @@ fn validate_request(state: &State<AppState>, req: &StartBuildRequest) -> Result<
     Ok(())
 }
 
-#[tauri::command]
-pub fn cancel_build(state: State<AppState>) {
-    if let Some(flag) = state.queue_cancel.lock().unwrap().as_ref() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
+/// 取消当前占用队列的任务。构建队列与三类离线任务全局互斥，
+/// queue_cancel 同一时刻只有一个占用方，故 cancel_build / cancel_offline 共用此实现；
+/// 前端按操作语义分别调用（命令拆分保留，便于将来各自差异化）
+fn signal_cancel(state: &State<AppState>) {
+    if let Some(flag) = state.queue_cancel.lock().as_ref() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
 }
 
 #[tauri::command]
-pub fn cancel_offline(state: State<AppState>) {
-    if let Some(flag) = state.queue_cancel.lock().unwrap().as_ref() { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
-}
+pub fn cancel_build(state: State<AppState>) { signal_cancel(&state); }
+
+#[tauri::command]
+pub fn cancel_offline(state: State<AppState>) { signal_cancel(&state); }
 
 /// 解析当前生效的导出目录：项目设置了就用它，否则数据根目录/exports；确保存在后返回
 #[tauri::command]
@@ -222,7 +231,7 @@ pub fn get_export_dir(app: AppHandle, state: State<'_, AppState>, export_dir: St
     let dir = if !export_dir.trim().is_empty() {
         export_dir.trim().to_string()
     } else {
-        let root = effective_root(&app, &state.config.lock().unwrap().global);
+        let root = effective_root(&app, &state.config.lock().global);
         root.join("exports").to_string_lossy().to_string()
     };
     let _ = std::fs::create_dir_all(&dir);
@@ -246,7 +255,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, dest_dir: String, project_id: Option<String>) -> Result<String, String> {
-    let cfg = state.config.lock().unwrap().clone();
+    let cfg = state.config.lock().clone();
     // 范围：指定项目则仅收集该项目的 Dockerfile，否则全部项目
     let scope_label = match &project_id {
         Some(pid) => {
@@ -268,7 +277,7 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
     acquire_offline(&state, "busy_export")?; // 与构建队列及另一次导出/导入/修复互斥
     let root = effective_root(&app, &cfg.global);
     let cancel = Arc::new(AtomicBool::new(false));
-    *state.queue_cancel.lock().unwrap() = Some(cancel.clone());
+    *state.queue_cancel.lock() = Some(cancel.clone());
     let rid = Local::now().format("offline-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();
@@ -301,11 +310,11 @@ pub async fn export_offline_pack(app: AppHandle, state: State<'_, AppState>, des
 pub async fn import_offline_pack(app: AppHandle, state: State<'_, AppState>, pack_dir: String) -> Result<String, String> {
     acquire_offline(&state, "busy_import")?; // 与构建队列及另一次导出/导入/修复互斥；导入期间禁止改配置（root 已固定）
     let (builder, root) = {
-        let cfg = state.config.lock().unwrap();
+        let cfg = state.config.lock();
         (cfg.global.builder_name.clone(), effective_root(&app, &cfg.global))
     };
     let cancel = Arc::new(AtomicBool::new(false));
-    *state.queue_cancel.lock().unwrap() = Some(cancel.clone());
+    *state.queue_cancel.lock() = Some(cancel.clone());
     let rid = Local::now().format("import-%Y%m%d-%H%M%S").to_string();
     let rid2 = rid.clone();
     let app2 = app.clone();

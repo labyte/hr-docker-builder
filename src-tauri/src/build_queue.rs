@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
@@ -20,7 +22,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
     impl Drop for QueueGuard {
         fn drop(&mut self) {
             if let Some(state) = self.0.try_state::<AppState>() {
-                if let Ok(mut q) = state.queue_cancel.lock() { *q = None; }
+                *state.queue_cancel.lock() = None;
             }
         }
     }
@@ -28,8 +30,8 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
 
     let (global, project, cancel) = {
         let state = app.state::<AppState>();
-        let cfg = state.config.lock().unwrap().clone();
-        let cancel = state.queue_cancel.lock().unwrap().clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+        let cfg = state.config.lock().clone();
+        let cancel = state.queue_cancel.lock().clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let proj = cfg.projects.iter().find(|p| p.id == req.project_id).cloned().unwrap_or_default();
         (cfg.global.clone(), proj, cancel)
     };
@@ -112,7 +114,7 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
                     let ef = if task.outputs.export_file {
                         // 文件名与实际落盘一致：{镜像名[-架构]}-{版本}.tar
                         let f = docker_exec::export_file_path(&task);
-                        export_files.lock().unwrap().push(f.clone());
+                        export_files.lock().push(f.clone());
                         Some(f)
                     } else { None };
                     emit("success", None, Some(tag.clone()), ef, None);
@@ -134,13 +136,13 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
         failed: counts.failed.load(Ordering::Relaxed),
         canceled: counts.canceled.load(Ordering::Relaxed),
         skipped: counts.skipped.load(Ordering::Relaxed),
-        export_files: std::mem::take(&mut *export_files.lock().unwrap()),
+        export_files: std::mem::take(&mut *export_files.lock()),
         log_dir: log_dir.to_string_lossy().to_string(),
     };
     // 先解锁再发 queue-done：前端收到完成事件后立即开始下一队列/保存配置时不会被误拒
     {
         let state = app.state::<AppState>();
-        *state.queue_cancel.lock().unwrap() = None;
+        *state.queue_cancel.lock() = None;
     }
     let _ = app.emit("queue-done", &done);
 }
@@ -148,14 +150,13 @@ pub async fn run(app: AppHandle, req: StartBuildRequest, run_id: String) {
 fn save_history(app: &AppHandle, task: &BuildTask, tag: &str, ok: bool) {
     let state = app.state::<AppState>();
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let cfg_clone = {
-        let mut cfg = state.config.lock().unwrap();
-        for prj in &mut cfg.projects {
-            if let Some(prog) = prj.programs.iter_mut().find(|p| p.id == task.program.id) {
-                prog.last_build = Some(crate::types::LastBuild { time: now.clone(), tag: tag.to_string(), arch: task.arch.clone(), ok });
-            }
+    // 同一把 config 锁内"修改+落盘"（与 save_config 互斥串行）：
+    // 若各自锁内 clone、锁外 save，并发任务的 rename 写入会互相覆盖丢 lastBuild
+    let mut cfg = state.config.lock();
+    for prj in &mut cfg.projects {
+        if let Some(prog) = prj.programs.iter_mut().find(|p| p.id == task.program.id) {
+            prog.last_build = Some(crate::types::LastBuild { time: now.clone(), tag: tag.to_string(), arch: task.arch.clone(), ok });
         }
-        cfg.clone()
-    };
-    let _ = project_store::save(app, &cfg_clone);
+    }
+    let _ = project_store::save(app, &cfg);
 }
