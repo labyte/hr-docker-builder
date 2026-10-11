@@ -7,7 +7,15 @@
       "Bash(node scripts/gen-icon.cjs)",
       "Bash(npx tauri *)",
       "Bash(npm run *)",
-      "Bash(npm ci *)"
+      "Bash(npm ci *)",
+      "Bash(sed -n 140:161p src-tauri/src/build_queue.rs 2>/dev/null; sed -n '140,161p' src-tauri/src/build_queue.rs; echo \"===commands 209-217===\"; sed -n '205,220p' src-tauri/src/commands.rs)",
+      "Bash(cargo test *)",
+      "Bash(npm test *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ],
+    "additionalDirectories": [
+      "/Users/no-onel/Work/hr/code/hr-docker-builder/src-tauri/src"
     ]
   }
 }
