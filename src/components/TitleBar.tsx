@@ -124,7 +124,9 @@ export default function TitleBar({ onOpenSettings, onOpenAbout }: Props) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-left" data-tauri-drag-region>
-        <span className="titlebar-title" data-tauri-drag-region>HR Docker Builder</span>
+        <span className="titlebar-title" data-tauri-drag-region>
+          HR Docker Builder{env?.hostArch && ` (${env.hostArch})`}
+        </span>
         {renderEnvStatus()}
       </div>
       <div className="titlebar-center" data-tauri-drag-region>
