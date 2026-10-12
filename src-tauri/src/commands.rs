@@ -258,7 +258,12 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut cmd = { let mut c = crate::shell::std_cmd("explorer"); c.arg(format!("/select,{}", p.to_string_lossy())); c };
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut cmd = { let mut c = crate::shell::std_cmd("xdg-open"); c.arg(p.parent().unwrap_or(std::path::Path::new("/"))); c };
+    let mut cmd = {
+        let target = if p.is_dir() { p } else { p.parent().unwrap_or(std::path::Path::new("/")) };
+        let mut c = crate::shell::std_cmd("xdg-open");
+        c.arg(target);
+        c
+    };
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
