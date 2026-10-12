@@ -266,17 +266,19 @@ body,
   color: #7ee2a8;
 }
 
-/* Tabs 内日志区撑满高度 */
-.log-tabs {
-  height: 100%;
+.log .warn {
+  color: #ffc069;
 }
-.log-tabs .ant-tabs-content-holder {
-  flex: 1;
-  min-height: 0;
+
+/* 日志面板标题栏 */
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
 }
-.log-tabs .ant-tabs-content {
-  height: 100%;
-}
-.log-tabs .ant-tabs-tabpane {
-  height: 100%;
+.log-header-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
 }

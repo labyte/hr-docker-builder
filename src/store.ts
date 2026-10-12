@@ -66,6 +66,7 @@ export interface BuilderState {
   cancelBuild: () => Promise<void>;
   cancelOffline: () => Promise<void>;
   clearLogs: () => void;
+  pushSysLog: (line: string) => void;
   setLang: (l: string) => void;
 }
 
@@ -98,11 +99,37 @@ export const useStore = create<BuilderState>((set, get) => ({
         });
       });
       await listen<StatusEvent>('build-status', ({ payload }) => {
+        const prev = get().statuses[payload.programId]?.[payload.arch];
         set((s) => ({ statuses: { ...s.statuses, [payload.programId]: { ...(s.statuses[payload.programId] ?? {}), [payload.arch]: payload } } }));
+        const TERMINAL = ['success', 'failed', 'canceled', 'skipped'];
+        if (prev?.status === payload.status) return;
+        const prog = get().config.projects.flatMap(p => p.programs).find(p => p.id === payload.programId);
+        const label = `${prog?.name ?? payload.programId} (${payload.arch})`;
+        const t = i18n.t;
+        if (payload.status === 'running') {
+          get().pushSysLog(`─── ${t('log.taskStart', { label })} ───`);
+        } else if (TERMINAL.includes(payload.status) && (!prev || !TERMINAL.includes(prev.status))) {
+          const key = `log.task${payload.status.charAt(0).toUpperCase() + payload.status.slice(1)}` as const;
+          const icon = payload.status === 'success' ? '✓' : payload.status === 'failed' ? '✗' : '⊘';
+          get().pushSysLog(`─── ${icon} ${t(key, { label })} ───`);
+        }
       });
       await listen<QueueDone>('queue-done', async ({ payload }) => {
         // 导出/导入完成时同步清掉离线任务忙碌标记（修复不走 queue-done，由 repairMirror 自行清理）
         set({ running: false, summary: payload, ...(payload.kind === 'build' ? {} : { offlineOp: null }) });
+        // 将汇总信息作为系统日志写入控制台
+        const now = new Date().toLocaleTimeString();
+        const s = get();
+        let text: string;
+        if (payload.kind === 'build') {
+          const allOk = payload.failed === 0 && payload.canceled === 0 && payload.skipped === 0;
+          const allFail = payload.success === 0;
+          const icon = allOk ? '✓' : allFail ? '✗' : '⚠';
+          text = i18n.t('log.summary', { icon, time: now, success: payload.success, failed: payload.failed, canceled: payload.canceled, skipped: payload.skipped });
+        } else {
+          text = i18n.t(`log.summary${payload.kind === 'export' ? 'Export' : 'Import'}${payload.failed > 0 ? 'Fail' : 'Ok'}`, { time: now });
+        }
+        s.pushSysLog(text);
         // 构建期间后端已把 lastBuild 写盘：重拉配置保持同步，
         // 防止前端旧副本在下次保存时把它回滚覆盖
         try { set({ config: await api.getConfig() }); } catch (e) { console.error(e); }
@@ -214,6 +241,8 @@ export const useStore = create<BuilderState>((set, get) => ({
     try {
       await api.startBuild({ programIds, projectId: s.selectedProjectId!, arches, outputs: s.outputs, concurrency: s.config.global.concurrency, failFast: s.config.global.failFast, exportDir: prj?.exportDir ?? '' });
       set({ running: true, summary: null, statuses: {}, totalTasks: programIds.length * arches.length });
+      const now = new Date().toLocaleTimeString();
+      get().pushSysLog(i18n.t('log.buildStart', { time: now, count: programIds.length, archs: arches.join(', ') }));
       return null;
     } catch (e) { return String(e); }
   },
@@ -221,6 +250,10 @@ export const useStore = create<BuilderState>((set, get) => ({
   cancelBuild: () => api.cancelBuild(),
   cancelOffline: () => api.cancelOffline(),
   clearLogs: () => set({ logs: {}, allLogs: [], summary: null }),
+  pushSysLog: (line: string) => {
+    const sys: LogLine = { taskId: '', projectId: '', line, stream: 'stdout' };
+    set((s) => ({ allLogs: [...s.allLogs, sys].slice(-ALL_CAP) }));
+  },
   setLang: (l) => { localStorage.setItem('ui-lang', l); void i18n.changeLanguage(l); get().saveGlobal({ language: l }); },
 }));
 

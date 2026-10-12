@@ -17,6 +17,7 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
   const setLang = useStore((s) => s.setLang);
   const offlineOp = useStore((s) => s.offlineOp);
   const setOfflineOp = useStore((s) => s.setOfflineOp);
+  const pushSysLog = useStore((s) => s.pushSysLog);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scope, setScope] = useState<'all' | 'current'>('all');
 
@@ -30,6 +31,7 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
     const dir = await openDialog({ directory: true });
     if (!dir || typeof dir !== 'string') { setScope('all'); return; }
     setOfflineOp('export');
+    pushSysLog(t('log.exportStart', { time: new Date().toLocaleTimeString() }));
     try { await api.exportOfflinePack(dir, scope === 'current' ? selectedId : null); }
     catch (e) { setOfflineOp(null); message.error(errText(e)); }
     setScope('all');
@@ -39,6 +41,7 @@ export default function GlobalActions({ onOpenSettings, onOpenAbout }: Props) {
     const dir = await openDialog({ directory: true });
     if (!dir || typeof dir !== 'string') return;
     setOfflineOp('import');
+    pushSysLog(t('log.importStart', { time: new Date().toLocaleTimeString() }));
     try { await api.importOfflinePack(dir); }
     catch (e) { setOfflineOp(null); message.error(errText(e)); }
   };

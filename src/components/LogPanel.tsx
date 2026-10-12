@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Empty, Switch, Tabs, Tooltip, Typography } from 'antd';
-import { FolderOpenFilled } from '@ant-design/icons';
+import { Button, Empty, Switch, Tooltip } from 'antd';
+import { FolderOpenFilled, LoadingOutlined, CheckCircleFilled, ExclamationCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { api } from '../api';
 import { useStore } from '../store';
 import type { LogLine } from '../types';
@@ -37,81 +37,70 @@ function LogView({ lines }: { lines: LogLine[] }) {
 }
 
 function classify(line: string): string {
-  if (/DONE|=> \[|exporting|naming to|writing image/.test(line)) return 'ok';
-  if (/\bERROR\b|error:|failed/i.test(line)) return 'err';
+  if (/⚠/.test(line)) return 'warn';
+  if (/▶|✓|开始构建|完成 ───|DONE|=> \[|exporting|naming to|writing image/.test(line)) return 'ok';
+  if (/✗|⊘|失败 ───|取消 ───|跳过 ───|\bERROR\b|error:|failed/i.test(line)) return 'err';
   return '';
 }
 
 export default function LogPanel() {
   const { t } = useTranslation();
-  const selectedProject = useStore((s) => s.config.projects.find(p => p.id === s.selectedProjectId));
-  const logs = useStore((s) => s.logs);
   const allLogs = useStore((s) => s.allLogs);
-  const statuses = useStore((s) => s.statuses);
   const summary = useStore((s) => s.summary);
   const clearLogs = useStore((s) => s.clearLogs);
+  const running = useStore((s) => s.running);
+  const totalTasks = useStore((s) => s.totalTasks);
+  const statuses = useStore((s) => s.statuses);
 
-  const [active, setActive] = useState('all');
+  const doneTasks = useMemo(() => {
+    let n = 0;
+    for (const perArch of Object.values(statuses))
+      for (const s of Object.values(perArch))
+        if (['success', 'failed', 'canceled', 'skipped'].includes(s.status)) n++;
+    return n;
+  }, [statuses]);
 
-  const visiblePrograms = useMemo(
-    () => selectedProject?.programs.filter((p) => logs[p.id]?.length || statuses[p.id]) ?? [],
-    [selectedProject, logs, statuses],
-  );
+  const showProgress = totalTasks > 0 && (running || summary?.kind === 'build');
 
-  const items = [
-    { key: 'all', label: t('log.all'), children: <LogView lines={allLogs} /> },
-    ...visiblePrograms.map((p) => ({ key: p.id, label: p.name, children: <LogView lines={logs[p.id] ?? []} /> })),
-  ];
-
-  // 汇总胶囊文案：构建展示各终态计数；导出/导入是单一操作，只区分成功/失败
-  const summaryText = summary && (
-    summary.kind === 'build'
-      ? t('log.summary', { success: summary.success, failed: summary.failed, canceled: summary.canceled, skipped: summary.skipped })
-      : t(`log.summary${summary.kind === 'export' ? 'Export' : 'Import'}${summary.failed > 0 ? 'Fail' : 'Ok'}`)
-  );
+  // 状态图标：构建中 → 旋转；完成 → 按结果着色
+  const statusIcon = useMemo(() => {
+    if (running) return <LoadingOutlined spin style={{ color: '#1677ff' }} />;
+    if (summary?.kind === 'build') {
+      const allOk = summary.failed === 0 && summary.canceled === 0 && summary.skipped === 0;
+      const allFail = summary.success === 0;
+      if (allOk) return <CheckCircleFilled style={{ color: '#52c41a' }} />;
+      if (allFail) return <CloseCircleFilled style={{ color: '#ff4d4f' }} />;
+      return <ExclamationCircleFilled style={{ color: '#faad14' }} />;
+    }
+    return null;
+  }, [running, summary]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '8px 12px 12px 12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <Typography.Text strong>{t('log.title')}</Typography.Text>
-        <Button size="small" onClick={clearLogs}>
-          {t('log.clear')}
-        </Button>
-        {summary && summary.logDir && (
-          <Tooltip title={summary.logDir}>
-            <Button size="small" icon={<FolderOpenFilled />} onClick={() => void api.revealPath(summary.logDir)}>
-              {t('log.openDir')}
-            </Button>
-          </Tooltip>
-        )}
-        {/* 结果汇总：带边框胶囊，整行靠右（配色沿用状态栏成功/失败色系） */}
-        {summary && (
-          <span style={{
-            marginLeft: 'auto', fontSize: 12, padding: '2px 10px', borderRadius: 8, whiteSpace: 'nowrap',
-            border: `1px solid ${summary.failed > 0 ? '#ffa39e' : '#b7eb8f'}`,
-            background: summary.failed > 0 ? '#fff2f0' : '#f6ffed',
-            color: summary.failed > 0 ? '#ff4d4f' : '#389e0d',
+      <div className="log-header">
+        <span className="log-header-title">{t('log.title')}</span>
+        {statusIcon}
+        {showProgress && <span style={{ fontSize: 12, color: '#8c8c8c' }}>{Math.min(doneTasks, totalTasks)}/{totalTasks}</span>}
+        <span style={{ flex: 1 }} />
+        <Button size="small" onClick={clearLogs}>{t('log.clear')}</Button>
+        <Tooltip title={summary?.logDir || ''}>
+          <Button size="small" icon={<FolderOpenFilled />} onClick={() => {
+            const dir = summary?.logDir || '';
+            if (dir) void api.revealPath(dir);
           }}>
-            {summaryText}
-          </span>
-        )}
+            {t('log.openDir')}
+          </Button>
+        </Tooltip>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {allLogs.length === 0 && !summary ? (
+        {allLogs.length === 0 ? (
           <div className="log-wrapper">
             <div className="log" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('log.empty')} />
             </div>
           </div>
         ) : (
-          <Tabs
-            size="small"
-            activeKey={active}
-            onChange={setActive}
-            items={items}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-            className="log-tabs"
-          />
+          <LogView lines={allLogs} />
         )}
       </div>
     </div>

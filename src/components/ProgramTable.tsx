@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { App, Button, Dropdown, Empty, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { CopyFilled, DeleteFilled, EditFilled, EllipsisOutlined, PlusOutlined, WarningFilled } from '@ant-design/icons';
@@ -43,6 +43,18 @@ export default function ProgramTable({ onEdit, onAddProgram }: Props) {
 
   const [sortMode, setSortMode] = useState<SortMode>('name');
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState<number | undefined>();
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => setTableHeight(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const issueSet = useMemo(() => {
     const set = new Set<string>();
@@ -186,9 +198,10 @@ export default function ProgramTable({ onEdit, onAddProgram }: Props) {
           </Button>
         )}
       </div>
-      <div style={{ flex:1, overflow:'auto', padding:'12px' }}>
+      <div ref={bodyRef} style={{ flex:1, minHeight: 0, padding:'12px' }}>
         <Table<Program>
           size="small" rowKey="id" columns={columns} dataSource={displayPrograms} pagination={false} tableLayout="fixed"
+          scroll={tableHeight ? { y: tableHeight - 48 } : undefined}
           locale={{ emptyText: <Empty description={t('table.empty')} style={{ padding:'36px 0' }} /> }}
           onRow={(record) => ({
             style: deletingIds.has(record.id) ? { background: '#fff1f0' } : undefined,
